@@ -86,7 +86,6 @@ export class SceneManager {
     this.camera.maxZ = 40000;
     this.camera.wheelDeltaPercentage = 0.015;
     this.camera.panningSensibility = 12;
-    this.camera.panningMouseButton = 2;
     const light = new HemisphericLight(
       "sky",
       new Vector3(0.2, 1, -0.5),
