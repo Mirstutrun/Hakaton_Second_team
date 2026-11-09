@@ -50,10 +50,16 @@ export function roadStyle(tags: Tags) {
  * Purely visual rounding: the underlying OSM nodes and exported XML are
  * untouched. Trim is capped so a short segment is never over-smoothed.
  */
-export function smoothRoadPoints(points: Vector3[], radius = 8): Vector3[] {
+export function smoothRoadPoints(
+  points: Vector3[], radius = 8, protectedIndices?: ReadonlySet<number>,
+): Vector3[] {
   if (points.length < 3 || radius <= 0) return points.map((p) => p.clone());
   const result: Vector3[] = [points[0].clone()];
   for (let i = 1; i < points.length - 1; i++) {
+    if (protectedIndices?.has(i)) {
+      result.push(points[i].clone());
+      continue;
+    }
     const prev = points[i - 1], current = points[i], next = points[i + 1];
     const into = current.subtract(prev), out = next.subtract(current);
     const inLen = into.length(), outLen = out.length();
@@ -105,12 +111,13 @@ export function laneCenterline(
 export function selectedLaneMesh(
   wayId: string, original: Vector3[], tags: Tags, lane: number,
   scene: Scene, material: Material,
+  protectedIndices?: ReadonlySet<number>,
 ): Mesh | null {
   const style = roadStyle(tags);
   if (style.pedestrian || lane < 0 || lane >= style.lanes ||
       original.length < 2) return null;
   const path = smoothRoadPoints(original.map((p) =>
-    new Vector3(p.x, style.elevation + 0.12, p.z)));
+    new Vector3(p.x, style.elevation + 0.12, p.z)), 8, protectedIndices);
   const centerline = laneCenterline(path, style.width, style.lanes, lane);
   const mesh = ribbon(`lane:${wayId}:${lane}`,
     centerline, Math.max(0.6, style.width / style.lanes - 0.25), scene);
@@ -165,12 +172,13 @@ export function buildRoad(
   scene: Scene,
   material: Material,
   lineMaterial: Material,
+  protectedIndices?: ReadonlySet<number>,
 ): Mesh[] {
   if (points.length < 2) return [];
   const style = roadStyle(tags);
   const path = smoothRoadPoints(points.map(
     (point) => new Vector3(point.x, style.elevation, point.z),
-  ));
+  ), 8, protectedIndices);
   const road = ribbon(`way:${id}`, path, style.width, scene);
   road.material = material;
   road.metadata = { type: "way", id, role: "road", width: style.width };
