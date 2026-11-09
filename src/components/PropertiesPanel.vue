@@ -7,6 +7,16 @@ import { useEditorStore } from "../stores/editor";
 const store = useEditorStore();
 const form = reactive<Record<string, string>>({});
 const confirmDelete = ref(false);
+const tags = computed(() => {
+  store.revision;
+  return store.selected ? tagsOf(store.selected) : {};
+});
+const isRoad = computed(() => store.selection?.type === "way");
+const isSignal = computed(() => tags.value.highway === "traffic_signals");
+const nodeRefs = computed(() =>
+  store.selected && isRoad.value ? refsOf(store.selected) : [],
+);
+const visualLanes = computed(() => roadStyle(tags.value).lanes);
 const laneForm = reactive({ turn: "", change: "", maxspeed: "" });
 const laneInfo = computed(() => {
   if (!isRoad.value || store.selectedLane === null || !store.selected) return null;
@@ -80,16 +90,6 @@ function deleteCustomTag(key: string) {
   if (!store.selection) return;
   store.execute({ type: "set-tags", target: store.selection, tags: { [key]: null } });
 }
-const tags = computed(() => {
-  store.revision;
-  return store.selected ? tagsOf(store.selected) : {};
-});
-const isRoad = computed(() => store.selection?.type === "way");
-const isSignal = computed(() => tags.value.highway === "traffic_signals");
-const nodeRefs = computed(() =>
-  store.selected && isRoad.value ? refsOf(store.selected) : [],
-);
-const visualLanes = computed(() => roadStyle(tags.value).lanes);
 const fields = [
   "name",
   "highway",
