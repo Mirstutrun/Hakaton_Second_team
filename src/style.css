@@ -1207,3 +1207,21 @@ footer { background: #fff; border-top: 1px solid #e2eaf2; color: #8298ad; height
   .traffic-more-actions { display: none; }
   .traffic-heading strong { font-size: 11px; }
 }
+
+
+@media (max-width: 900px) {
+  .tools-panel > .tool-group { display: block !important; }
+  .tools-panel > .tools-intro,
+  .tools-panel > .find-section,
+  .tools-panel > .layer-settings,
+  .tools-panel > .project-card { display: none !important; }
+}
+@media (max-width: 800px) {
+  .top-actions > button:nth-child(4),
+  .top-actions > button:nth-child(5) { display: inline-flex !important; }
+  .top-actions > button:nth-child(3) { display: none; }
+}
+@media (max-width: 580px) {
+  .tool-group { display: block !important; }
+  .top-actions > button:nth-child(5) { display: inline-flex !important; }
+}
