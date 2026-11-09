@@ -3,6 +3,9 @@ import { Vector3 } from "@babylonjs/core";
 import { parseOsm } from "../src/core/osm/parser";
 import { smoothRoadPoints, laneCenterline } from "../src/engine/geometry/roads";
 import { TrafficModel, speedMetersPerSecond } from "../src/engine/TrafficModel";
+import { applyEdit, applyPatch } from "../src/core/osm/commands";
+import { serializeOsm } from "../src/core/osm/serializer";
+import { refsOf } from "../src/core/osm/model";
 
 const oneWay = `<osm version="0.6">
   <node id="1" lat="52" lon="104" />
@@ -58,6 +61,42 @@ describe("lane geometry and local traffic preview", () => {
     car.progress = 0.95;
     model.update(0.05);
     expect(car.stopped).toBe(true);
+  });
+
+  it("smoothes exported OSM geometry without changing endpoint connectivity", () => {
+    const xml = `<osm version="0.6">
+      <node id="1" lat="52" lon="104"/>
+      <node id="2" lat="52" lon="104.001"/>
+      <node id="3" lat="52.001" lon="104.001"/>
+      <way id="10"><nd ref="1"/><nd ref="2"/><nd ref="3"/>
+        <tag k="highway" v="residential"/></way>
+    </osm>`;
+    const doc = parseOsm(xml);
+    const patch = applyEdit(doc, { type: "smooth-road", wayId: "10", radius: 9 });
+    const refs = refsOf(doc.ways.get("10")!);
+    expect(refs.length).toBeGreaterThan(3);
+    expect(refs[0]).toBe("1");
+    expect(refs[refs.length - 1]).toBe("3");
+    expect(serializeOsm(doc)).toContain("<osm");
+    applyPatch(doc, patch, "before");
+    expect(refsOf(doc.ways.get("10")!)).toEqual(["1", "2", "3"]);
+    expect(serializeOsm(doc)).toBe(xml);
+  });
+
+  it("does not smooth a shared intersection node", () => {
+    const xml = `<osm version="0.6">
+      <node id="1" lat="52" lon="104"/>
+      <node id="2" lat="52" lon="104.001"/>
+      <node id="3" lat="52.001" lon="104.001"/>
+      <node id="4" lat="51.999" lon="104.001"/>
+      <way id="10"><nd ref="1"/><nd ref="2"/><nd ref="3"/><tag k="highway" v="residential"/></way>
+      <way id="11"><nd ref="2"/><nd ref="4"/><tag k="highway" v="residential"/></way>
+    </osm>`;
+    const doc = parseOsm(xml);
+    expect(() => applyEdit(doc, {
+      type: "smooth-road", wayId: "10",
+    })).toThrow("Общие перекрёстки");
+    expect(refsOf(doc.ways.get("10")!)).toEqual(["1", "2", "3"]);
   });
 
   it("parses speeds and applies conservative limits", () => {
