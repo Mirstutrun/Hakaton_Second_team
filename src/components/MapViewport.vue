@@ -27,7 +27,7 @@ watch(
   () => manager?.refreshChangedMeshes(store.lastPatch),
 );
 watch(
-  () => [store.selection, store.selectedVertex],
+  () => [store.selection, store.selectedVertex, store.selectedLane],
   () => manager?.refreshSelection(),
   { deep: true },
 );
@@ -79,7 +79,7 @@ onBeforeUnmount(() => manager?.dispose());
     </div>
     <div class="compass"><span>N</span><b>↑</b><small>СЕВЕР</small></div>
     <div class="map-credit">
-      © OpenStreetMap contributors · локальные данные
+      © OpenStreetMap contributors
     </div>
     <div class="view-controls">
       <div class="segmented">
