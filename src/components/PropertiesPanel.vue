@@ -7,6 +7,60 @@ import { useEditorStore } from "../stores/editor";
 const store = useEditorStore();
 const form = reactive<Record<string, string>>({});
 const confirmDelete = ref(false);
+const laneForm = reactive({ turn: "", change: "", maxspeed: "" });
+const laneInfo = computed(() => {
+  if (!isRoad.value || store.selectedLane === null || !store.selected) return null;
+  const tag = tags.value;
+  const count = roadStyle(tag).lanes;
+  const lane = store.selectedLane;
+  if (lane < 0 || lane >= count || roadStyle(tag).pedestrian) return null;
+  const oneway = tag.oneway === "yes" || tag.oneway === "-1" ||
+    tag.junction === "roundabout";
+  const backwards = tag.oneway === "-1";
+  if (oneway) {
+    return { index: backwards ? count - lane - 1 : lane, count,
+      suffix: backwards ? ":backward" : "",
+      direction: backwards ? "Против направления way" : "По направлению way" };
+  }
+  const backwardCount = Math.max(1, Number(tag["lanes:backward"]) ||
+    Math.floor(count / 2));
+  const backward = lane < backwardCount;
+  return backward
+    ? { index: backwardCount - lane - 1, count: backwardCount,
+        suffix: ":backward", direction: "Обратное направление" }
+    : { index: lane - backwardCount, count: Math.max(1, count - backwardCount),
+        suffix: ":forward", direction: "Прямое направление" };
+});
+function laneTagKey(kind: string): string {
+  return `${kind}:lanes${laneInfo.value?.suffix || ""}`;
+}
+function laneValue(kind: string): string {
+  const info = laneInfo.value;
+  if (!info) return "";
+  return (tags.value[laneTagKey(kind)] ?? "").split("|")[info.index] ?? "";
+}
+watch(() => [store.selectedLane, store.selection, store.revision], () => {
+  laneForm.turn = laneValue("turn");
+  laneForm.change = laneValue("change");
+  laneForm.maxspeed = laneValue("maxspeed");
+}, { immediate: true, deep: true });
+function applyLane() {
+  const info = laneInfo.value;
+  if (!info || !store.selection) return;
+  const updates: Record<string, string | null> = {};
+  for (const field of ["turn", "change", "maxspeed"] as const) {
+    if (laneForm[field] === laneValue(field)) continue;
+    const key = laneTagKey(field);
+    const values = (tags.value[key] ?? "").split("|");
+    while (values.length < info.count) values.push("");
+    values[info.index] = laneForm[field].trim();
+    const next = values.join("|");
+    updates[key] = values.every((value) => value === "") ? null : next;
+  }
+  if (Object.keys(updates).length) store.execute({
+    type: "set-tags", target: store.selection, tags: updates,
+  });
+}
 const extraKey = ref("");
 const extraValue = ref("");
 function putCustomTag() {
@@ -293,6 +347,47 @@ function removeVertex() {
         </button>
       </form>
       <template v-if="isRoad">
+        <div class="divider"></div>
+        <div class="section-label">ВЫБОР ПОЛОСЫ</div>
+        <p class="field-hint">Нажмите на полосу на карте или выберите ниже.</p>
+        <div class="lane-picker">
+          <button v-for="i in visualLanes" :key="i"
+            :class="{ 'lane-active': store.selectedLane === i - 1 }"
+            @click="store.selectedLane = i - 1">
+            {{ i }}
+          </button>
+        </div>
+        <form v-if="laneInfo" class="lane-settings" @submit.prevent="applyLane">
+          <p class="field-hint">Полоса {{ store.selectedLane! + 1 }} · {{ laneInfo.direction }}</p>
+          <label>Разрешённые повороты
+            <select v-model="laneForm.turn" aria-label="Повороты выбранной полосы">
+              <option value="">Не указано</option>
+              <option value="left">Налево</option>
+              <option value="through">Прямо</option>
+              <option value="right">Направо</option>
+              <option value="left;through">Налево / прямо</option>
+              <option value="through;right">Прямо / направо</option>
+              <option value="reverse">Разворот</option>
+              <option value="none">Без поворотов</option>
+            </select>
+          </label>
+          <label>Перестроение
+            <select v-model="laneForm.change" aria-label="Перестроение с полосы">
+              <option value="">Не указано</option>
+              <option value="yes">Разрешено</option>
+              <option value="no">Запрещено</option>
+              <option value="not_left">Нельзя влево</option>
+              <option value="not_right">Нельзя вправо</option>
+              <option value="only_left">Только влево</option>
+              <option value="only_right">Только вправо</option>
+            </select>
+          </label>
+          <label>Ограничение скорости полосы (км/ч)
+            <input v-model="laneForm.maxspeed" aria-label="Скорость выбранной полосы"
+              placeholder="Например, 40" />
+          </label>
+          <button class="primary full-width">Сохранить полосу</button>
+        </form>
         <div class="divider"></div>
         <div class="section-label">
           ГЕОМЕТРИЯ · {{ nodeRefs.length }} ВЕРШИН
