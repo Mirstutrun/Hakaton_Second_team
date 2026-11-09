@@ -89,6 +89,9 @@ function checkTags(tags: Record<string, string | null>): void {
       throw new Error("Некорректное направление дороги");
     if (key === "layer" && !/^-?\d+$/.test(value))
       throw new Error("Уровень должен быть целым числом");
+    if (key === "width" &&
+        (!Number.isFinite(Number(value)) || Number(value) <= 0))
+      throw new Error("Ширина должна быть положительным числом в метрах");
   }
 }
 
@@ -187,6 +190,13 @@ export function applyEdit(
         const backward = Number(combined["lanes:backward"] || 0);
         if (total && forward + backward > total)
           throw new Error("Сумма полос по направлениям превышает общее число");
+        if (combined.oneway === "yes" && backward > 0)
+          throw new Error("Для oneway=yes нельзя указывать встречные полосы");
+        if (combined.oneway === "-1" && forward > 0)
+          throw new Error("Для oneway=-1 нельзя указывать прямые полосы");
+        if (combined.bridge && combined.bridge !== "no" &&
+            combined.tunnel && combined.tunnel !== "no")
+          throw new Error("Объект не может быть одновременно мостом и тоннелем");
         setTags(command.target.type, command.target.id, command.tags);
         break;
       }
