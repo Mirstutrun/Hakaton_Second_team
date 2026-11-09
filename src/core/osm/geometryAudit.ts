@@ -73,12 +73,15 @@ function intersection(a: Point, b: Point, c: Point, d: Point): Point | null {
     return null;
   return { x: a.x + t * r.x, z: a.z + t * r.z };
 }
-function pointToSegment(point: Point, a: Point, b: Point): number {
+function closestOnSegment(point: Point, a: Point, b: Point): Point {
   const delta = subtract(b, a);
   const length2 = squared(a, b);
   const t = length2 ? Math.max(0, Math.min(1,
     ((point.x - a.x) * delta.x + (point.z - a.z) * delta.z) / length2)) : 0;
-  return Math.sqrt(squared(point, { x: a.x + delta.x * t, z: a.z + delta.z * t }));
+  return { x: a.x + delta.x * t, z: a.z + delta.z * t };
+}
+function pointToSegment(point: Point, a: Point, b: Point): number {
+  return Math.sqrt(squared(point, closestOnSegment(point, a, b)));
 }
 function inside(point: Point, ring: Point[]): boolean {
   let result = false;
@@ -291,12 +294,22 @@ export function auditGeometry(document: OsmDocument): ValidationIssue[] {
           nearest = segment;
         }
       }
-      if (nearest) push({
-        severity: "warning", code: "near-disconnection",
-        id: nodeId, elementType: "node",
-        coordinate: coordinateOf(document.nodes.get(nodeId)!),
-        message: `Конец дороги ${wayId} почти касается ${nearest.wayId} (${distance.toFixed(1)} м), но не соединён`,
-      });
+      if (nearest) {
+        const snapped = closestOnSegment(point, nearest.a, nearest.b);
+        const interior = Math.sqrt(squared(snapped, nearest.a)) >= 0.75 &&
+          Math.sqrt(squared(snapped, nearest.b)) >= 0.75;
+        push({
+          severity: "warning", code: "near-disconnection",
+          id: nodeId, elementType: "node",
+          coordinate: coordinateOf(document.nodes.get(nodeId)!),
+          message: `Конец дороги ${wayId} почти касается ${nearest.wayId} (${distance.toFixed(1)} м), но не соединён`,
+          fix: interior ? {
+            kind: "attach-endpoint", nodeId, targetWayId: nearest.wayId,
+            targetIndex: nearest.index,
+            coordinate: projection.unproject(snapped),
+          } : undefined,
+        });
+      }
     }
   }
   // Undirected connectivity check: disconnected motor-road subgraphs are
