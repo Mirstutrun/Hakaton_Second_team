@@ -183,3 +183,51 @@ test("real map: edit lanes, draw, move, signal, delete, undo, export and reimpor
   await page.screenshot({ path: testInfo.outputPath("editor.png") });
   expect(errors).toEqual([]);
 });
+
+test("2D preview: lane tags, vehicles and keyboard shortcuts", async ({ page }) => {
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  await page.goto("/");
+  await expect(page.getByText("Ссылки дорог корректны")).toBeVisible({ timeout: 60000 });
+  await expect(page.getByRole("button", { name: "2D", exact: true })).toHaveClass(/active/);
+  const wayId = await page.evaluate(async () => {
+    const store = (await import("/src/stores/editor.ts")).useEditorStore();
+    return Array.from(store.document.ways.values())
+      .find((way) => way.querySelector('tag[k="lanes"][v="2"]') &&
+        way.querySelector('tag[k="highway"]'))?.getAttribute("id");
+  });
+  expect(wayId).toBeTruthy();
+  await page.getByRole("textbox", { name: "OSM ID", exact: true }).fill(wayId!);
+  await page.getByRole("button", { name: "Найти объект" }).click();
+  await page.locator(".lane-picker button").first().click();
+  await page.getByRole("combobox", { name: "Повороты выбранной полосы" }).selectOption("left");
+  await page.getByRole("button", { name: "Сохранить полосу" }).click();
+  const laneSaved = await page.evaluate(async (id) => {
+    const store = (await import("/src/stores/editor.ts")).useEditorStore();
+    const way = store.document.ways.get(id);
+    return Array.from(way.querySelectorAll("tag"))
+      .some((tag) => tag.getAttribute("k")?.startsWith("turn:lanes") &&
+        tag.getAttribute("v")?.includes("left"));
+  }, wayId);
+  expect(laneSaved).toBe(true);
+  await page.getByRole("button", { name: "Отменить", exact: true }).click();
+  await page.keyboard.press("Control+y");
+  const replayed = await page.evaluate(async (id) => {
+    const store = (await import("/src/stores/editor.ts")).useEditorStore();
+    return Array.from(store.document.ways.get(id).querySelectorAll("tag"))
+      .some((tag) => tag.getAttribute("k")?.startsWith("turn:lanes") &&
+        tag.getAttribute("v")?.includes("left"));
+  }, wayId);
+  expect(replayed).toBe(true);
+  await page.getByRole("button", { name: "+1", exact: true }).click();
+  expect(await page.evaluate(async () =>
+    (await import("/src/stores/editor.ts")).useEditorStore().vehicleCount)).toBe(1);
+  await page.keyboard.press("Space");
+  expect(await page.evaluate(async () =>
+    (await import("/src/stores/editor.ts")).useEditorStore().trafficRunning)).toBe(false);
+  page.once("dialog", (dialog) => dialog.accept());
+  await page.getByRole("button", { name: "Очистить" }).click();
+  expect(await page.evaluate(async () =>
+    (await import("/src/stores/editor.ts")).useEditorStore().vehicleCount)).toBe(0);
+  expect(errors).toEqual([]);
+});
