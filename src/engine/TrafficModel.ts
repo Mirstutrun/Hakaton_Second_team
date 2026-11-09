@@ -140,11 +140,26 @@ export class TrafficModel {
   update(dt: number, speedFactor = 1): void {
     const elapsed = clamp(dt, 0, 0.1) * clamp(speedFactor, 0, 5);
     this.seconds += elapsed;
+    const lanes = new Map<TrafficEdge, Map<number, TrafficVehicle[]>>();
+    for (const car of this.cars.values()) {
+      const byLane = lanes.get(car.edge) ?? new Map<number, TrafficVehicle[]>();
+      const row = byLane.get(car.lane) ?? [];
+      row.push(car);
+      byLane.set(car.lane, row);
+      lanes.set(car.edge, byLane);
+    }
+    for (const byLane of lanes.values())
+      for (const row of byLane.values())
+        row.sort((a, b) => b.progress - a.progress);
     for (const car of this.cars.values()) {
       const distanceLeft = (1 - car.progress) * car.edge.length;
       const signalRed = this.signals.has(car.edge.to) &&
         (Math.floor(this.seconds / 12) % 2 === 0);
-      car.stopped = signalRed && distanceLeft < 7;
+      const queue = lanes.get(car.edge)?.get(car.lane) ?? [];
+      const index = queue.indexOf(car);
+      const leading = index > 0 ? queue[index - 1] : null;
+      const headway = leading ? (leading.progress - car.progress) * car.edge.length : Infinity;
+      car.stopped = (signalRed && distanceLeft < 7) || headway < 7.5;
       if (car.stopped) continue;
       car.progress += (car.speed * elapsed) / car.edge.length;
       if (car.progress < 1) continue;
