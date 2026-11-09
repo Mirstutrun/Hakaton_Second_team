@@ -3,7 +3,6 @@ import {
   coordinateOf,
   refsOf,
   tagsOf,
-  type Coordinate,
   type OsmDocument,
   type Tags,
 } from "./model";
@@ -173,7 +172,6 @@ export function auditGeometry(document: OsmDocument): ValidationIssue[] {
       coordinates.set(id, projection.project(point));
   }
 
-  const polygons: Footprint[] = [];
   const buildingGrid = new SpatialGrid<Footprint>();
   const segments: Segment[] = [];
   const segmentGrid = new SpatialGrid<Segment>();
@@ -193,7 +191,6 @@ export function auditGeometry(document: OsmDocument): ValidationIssue[] {
           bounds: { minX: Math.min(...xs), minZ: Math.min(...zs),
             maxX: Math.max(...xs), maxZ: Math.max(...zs) },
         };
-        polygons.push(footprint);
         buildingGrid.add(footprint.bounds, footprint);
       }
     }
@@ -239,11 +236,13 @@ export function auditGeometry(document: OsmDocument): ValidationIssue[] {
       const point = intersection(segment.a, segment.b, other.a, other.b);
       if (!point) continue;
       const coordinate = projection.unproject(point);
+      const endpoint = [segment.a, segment.b, other.a, other.b]
+        .some((end) => Math.sqrt(squared(end, point)) < 0.75);
       push({
         severity: "warning", code: "unconnected-crossing",
         id: segment.wayId, elementType: "way", coordinate,
         message: `Дороги ${segment.wayId} и ${other.wayId} пересекаются без общего узла`,
-        fix: {
+        fix: endpoint ? undefined : {
           kind: "connect-crossing", wayA: segment.wayId, indexA: segment.index,
           wayB: other.wayId, indexB: other.index, coordinate,
         },
