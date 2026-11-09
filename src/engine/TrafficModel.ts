@@ -92,6 +92,18 @@ export class TrafficModel {
   get available() { return this.starts.length; }
   get size() { return this.cars.size; }
   get clock() { return this.seconds; }
+  addAt(wayId: string, from: string, to: string, progress: number, lane = 0): string | null {
+    const edge = this.starts.find((candidate) => candidate.wayId === wayId &&
+      candidate.from === from && candidate.to === to);
+    if (!edge) return null;
+    const id = String(this.nextId++);
+    this.cars.set(id, {
+      id, edge, progress: clamp(progress, 0.02, 0.96),
+      speed: edge.speed * 0.85, lane: clamp(lane, 0, edge.lanes - 1),
+      color: Number(id) % 6, stopped: false,
+    });
+    return id;
+  }
   add(count = 1, wayId?: string): string[] {
     const ids: string[] = [];
     const pool = wayId ? this.starts.filter((edge) => edge.wayId === wayId) : this.starts;
