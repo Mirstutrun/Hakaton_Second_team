@@ -85,10 +85,9 @@ function keyboard(event: KeyboardEvent) {
     store.trafficRunning = !store.trafficRunning;
     return;
   }
-  if (event.key.toLowerCase() === "c" && store.document) {
+  if (event.key.toLowerCase() === "c" && store.document && event.shiftKey) {
     event.preventDefault();
-    if (event.shiftKey) store.vehicleAddBatchRequest++;
-    else store.vehicleAddRequest++;
+    store.vehicleAddBatchRequest++;
     return;
   }
   if (event.key === "Escape") {
@@ -130,8 +129,8 @@ onBeforeUnmount(() => {
       <a class="brand" href="#" aria-label="RoadForge"
         ><span class="brand-mark">R</span
         ><span
-          >roadforge<span class="brand-3d">3D</span
-          ><small>OSM · 2D / 3D</small></span
+          >Дороги<span class="brand-3d">Иркутск</span
+          ><small>РЕДАКТОР ДОРОЖНОЙ СЕТИ</small></span
         ></a
       >
       <div class="document-name">
@@ -158,13 +157,13 @@ onBeforeUnmount(() => {
         ><span class="action-divider"></span
         ><button @click="loadExample">Пример</button
         ><button @click="input?.click()">
-          <AppIcon name="import" /> Импорт</button
+          <AppIcon name="import" /> Открыть карту</button
         ><button
           class="primary"
           :disabled="!store.document"
           @click="store.exportOsm()"
         >
-          Экспорт OSM <AppIcon name="export" /></button
+          Сохранить карту <AppIcon name="export" /></button
         ><input
           ref="input"
           data-testid="file-input"
