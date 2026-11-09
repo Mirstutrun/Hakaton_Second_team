@@ -92,11 +92,12 @@ export class TrafficModel {
   get available() { return this.starts.length; }
   get size() { return this.cars.size; }
   get clock() { return this.seconds; }
-  add(count = 1): string[] {
+  add(count = 1, wayId?: string): string[] {
     const ids: string[] = [];
-    if (!this.starts.length) return ids;
+    const pool = wayId ? this.starts.filter((edge) => edge.wayId === wayId) : this.starts;
+    if (!pool.length) return ids;
     for (let i = 0; i < Math.min(count, 150); i++) {
-      const edge = this.starts[Math.floor(Math.random() * this.starts.length)];
+      const edge = pool[Math.floor(Math.random() * pool.length)];
       const id = String(this.nextId++);
       this.cars.set(id, {
         id, edge, progress: 0.05 + Math.random() * 0.7,
