@@ -31,7 +31,7 @@ export const useEditorStore = defineStore("editor", () => {
   const trafficRunning = ref(true);
   const trafficSpeed = ref(1);
   const tool = ref<EditorTool>("select");
-  const view = ref<"3d" | "2d">("3d");
+  const view = ref<"3d" | "2d">("2d");
   const buildings = ref(true);
   const markings = ref(true);
   const pedestrians = ref(true);
