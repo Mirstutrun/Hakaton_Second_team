@@ -177,13 +177,12 @@ export class TrafficModel {
     }
   }
   pose(car: TrafficVehicle): VehiclePose {
-    const { a, b, width, lanes, elevation, oneway } = car.edge;
+    const { a, b, width, lanes, elevation } = car.edge;
     const dx = b.x - a.x, dz = b.z - a.z;
     const length = Math.hypot(dx, dz) || 1;
     const laneWidth = width / Math.max(1, lanes);
     // Russia: traffic keeps to the right, even for reverse-way edges.
-    const offset = -width / 2 + (car.lane + 0.5) * laneWidth;
-    const offsetSide = oneway ? offset : -width / 4 + car.lane * laneWidth;
+    const offsetSide = -width / 2 + (car.lane + 0.5) * laneWidth;
     return {
       x: a.x + dx * car.progress - (dz / length) * offsetSide,
       z: a.z + dz * car.progress + (dx / length) * offsetSide,
