@@ -70,7 +70,7 @@ export class SceneManager {
       Math.max(1, window.devicePixelRatio / 1.5),
     );
     this.scene = new Scene(this.engine);
-    this.scene.clearColor = new Color4(0.055, 0.085, 0.1, 1);
+    this.scene.clearColor = new Color4(0.87, 0.92, 0.94, 1);
     this.camera = new ArcRotateCamera(
       "camera",
       -Math.PI / 2,
@@ -80,7 +80,7 @@ export class SceneManager {
       this.scene,
     );
     this.camera.attachControl(canvas, true);
-    this.camera.lowerRadiusLimit = 25;
+    this.camera.lowerRadiusLimit = 12;
     this.camera.upperRadiusLimit = 16000;
     this.camera.lowerBetaLimit = 0.02;
     this.camera.upperBetaLimit = Math.PI / 2 - 0.05;
@@ -94,19 +94,19 @@ export class SceneManager {
       this.scene,
     );
     light.intensity = 1.2;
-    light.groundColor = Color3.FromHexString("#22312d");
+    light.groundColor = Color3.FromHexString("#cadbdd");
     for (const [name, color] of Object.entries({
-      asphalt: "#424f52",
-      pedestrian: "#67766a",
-      building: "#667d82",
-      selected: "#20c99c",
-      selectedLane: "#d0ffc0",
-      selectedVehicle: "#f6e391",
-      handle: "#baffd8",
-      ground: "#18292c",
-      pole: "#263f45",
-      lamp: "#7dffb5",
-      line: "#d8e9cc",
+      asphalt: "#7b929e",
+      pedestrian: "#bbcebe",
+      building: "#b6c8d5",
+      selected: "#188ba4",
+      selectedLane: "#38d5ee",
+      selectedVehicle: "#ffac38",
+      handle: "#effcfd",
+      ground: "#edf3ef",
+      pole: "#415f74",
+      lamp: "#43cbb0",
+      line: "#edf9f4",
       issueCrossing: "#ffb968",
       issueBuilding: "#ff6e84",
       issueGap: "#aee1ff",
@@ -147,7 +147,7 @@ export class SceneManager {
       ]);
     }
     const grid = MeshBuilder.CreateLineSystem("grid", { lines }, this.scene);
-    grid.color = Color3.FromHexString("#294044");
+    grid.color = Color3.FromHexString("#d8e5e2");
     grid.isPickable = false;
     this.scene.onPointerObservable.add((info) =>
       this.pointer(info.type, info.event as PointerEvent),
@@ -189,6 +189,7 @@ export class SceneManager {
     this.refreshSelection();
     this.refreshIssues();
     this.visibility();
+    this.addVehicles(18);
   }
 
   private rebuildJunctionCounts() {
@@ -309,24 +310,54 @@ export class SceneManager {
     if (this.document) this.traffic = new TrafficModel(this.document);
   }
 
+  addVehicleAt(wayId: string, position: Vector3) {
+    if (!this.document || !this.traffic) return;
+    const way = this.document.ways.get(wayId);
+    if (!way) return;
+    const nearest = this.nearestSegment(wayId, position);
+    const refs = refsOf(way);
+    const from = refs[nearest.index - 1], to = refs[nearest.index];
+    const a = this.point(from), b = this.point(to);
+    if (!a || !b) return;
+    const delta = b.subtract(a);
+    const progress = Math.max(0.02, Math.min(0.96,
+      Vector3.Dot(position.subtract(a), delta) / (delta.lengthSquared() || 1)));
+    const lane = this.laneAtPoint(wayId, position) ?? 0;
+    const id = this.traffic.addAt(wayId, from, to, progress, lane) ??
+      this.traffic.addAt(wayId, to, from, 1 - progress, lane);
+    if (!id) {
+      this.store.error = "На выбранной дороге нет доступного направления движения";
+      return;
+    }
+    this.spawnCarMesh(id);
+    this.store.vehicleCount = this.traffic.size;
+  }
+
+  private spawnCarMesh(id: string) {
+    const vehicle = this.traffic?.cars.get(id);
+    if (!vehicle) return;
+    const mesh = MeshBuilder.CreateBox(`vehicle:${id}`,
+      { width: 1.8, height: 1.25, depth: 4.1 }, this.scene);
+    mesh.material = this.vehicleMaterials[vehicle.color % this.vehicleMaterials.length];
+    mesh.metadata = { role: "vehicle", id };
+    const cabin = MeshBuilder.CreateBox(`vehicle-cabin:${id}`,
+      { width: 1.45, height: 0.35, depth: 2.05 }, this.scene);
+    cabin.parent = mesh;
+    cabin.position.set(0, 0.73, -0.2);
+    cabin.material = this.materials.pole;
+    cabin.isPickable = false;
+    this.vehicleMeshes.set(id, mesh);
+    const position = this.traffic!.pose(vehicle);
+    mesh.position.set(position.x, position.y, position.z);
+    mesh.rotation.y = position.heading;
+  }
+
   addVehicles(count: number) {
     if (!this.traffic) return;
     const wayId = this.store.selection?.type === "way"
       ? this.store.selection.id : undefined;
-    for (const id of this.traffic.add(count, wayId)) {
-      const vehicle = this.traffic.cars.get(id)!;
-      const mesh = MeshBuilder.CreateBox(`vehicle:${id}`,
-        { width: 1.8, height: 1.25, depth: 4.1 }, this.scene);
-      mesh.material = this.vehicleMaterials[vehicle.color % this.vehicleMaterials.length];
-      mesh.metadata = { role: "vehicle", id };
-      const cabin = MeshBuilder.CreateBox(`vehicle-cabin:${id}`,
-        { width: 1.45, height: 0.35, depth: 2.05 }, this.scene);
-      cabin.parent = mesh;
-      cabin.position.set(0, 0.73, -0.2);
-      cabin.material = this.materials.pole;
-      cabin.isPickable = false;
-      this.vehicleMeshes.set(id, mesh);
-    }
+    for (const id of this.traffic.add(count, wayId))
+      this.spawnCarMesh(id);
     this.store.vehicleCount = this.traffic.size;
   }
 
@@ -716,12 +747,29 @@ export class SceneManager {
       Math.hypot(event.clientX - this.down.x, event.clientY - this.down.y) > 5
     )
       return;
+    const roadOnly = this.store.tool === "lane" || this.store.tool === "car";
     const pick = this.scene.pick(
       this.scene.pointerX,
       this.scene.pointerY,
-      (mesh) => ["road", "handle", "signal", "issue", "vehicle"].includes(mesh.metadata?.role),
+      (mesh) => roadOnly
+        ? mesh.metadata?.role === "road"
+        : ["road", "handle", "signal", "issue", "vehicle"].includes(mesh.metadata?.role),
     );
     const metadata = pick?.pickedMesh?.metadata;
+    if (this.store.tool === "car") {
+      if (metadata?.role === "road" && pick?.pickedPoint) {
+        this.addVehicleAt(metadata.id, pick.pickedPoint);
+      } else this.store.error = "Нажмите на дорожное полотно, чтобы добавить машину";
+      return;
+    }
+    if (this.store.tool === "lane") {
+      if (metadata?.role === "road" && pick?.pickedPoint) {
+        this.store.selectOsmElement({ type: "way", id: metadata.id });
+        this.store.selectedLane = this.laneAtPoint(metadata.id, pick.pickedPoint);
+        this.refreshSelection();
+      } else this.store.error = "Нажмите на одну из полос дороги";
+      return;
+    }
     if (this.store.tool === "draw") {
       const point = this.groundPoint();
       if (point) {

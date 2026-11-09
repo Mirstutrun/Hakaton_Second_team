@@ -168,7 +168,7 @@ test("real map: edit lanes, draw, move, signal, delete, undo, export and reimpor
   expect((await state(page)).roads).toBe(861);
   await page.getByRole("button", { name: "Отменить", exact: true }).click();
   const downloadEvent = page.waitForEvent("download");
-  await page.getByRole("button", { name: "Экспорт OSM" }).click();
+  await page.getByRole("button", { name: "Сохранить карту" }).click();
   const download = await downloadEvent;
   const path = testInfo.outputPath("edited.osm");
   await download.saveAs(path);
@@ -201,7 +201,7 @@ test("2D preview: lane tags, vehicles and keyboard shortcuts", async ({ page }) 
   await page.getByRole("button", { name: "Найти объект" }).click();
   await page.locator(".lane-picker button").first().click();
   await page.getByRole("combobox", { name: "Повороты выбранной полосы" }).selectOption("left");
-  await page.getByRole("button", { name: "Сохранить полосу" }).click();
+  await page.getByRole("button", { name: "Применить к полосе" }).click();
   const laneSaved = await page.evaluate(async (id) => {
     const store = (await import("/src/stores/editor.ts")).useEditorStore();
     const way = store.document.ways.get(id);
@@ -219,9 +219,9 @@ test("2D preview: lane tags, vehicles and keyboard shortcuts", async ({ page }) 
         tag.getAttribute("v")?.includes("left"));
   }, wayId);
   expect(replayed).toBe(true);
-  await page.getByRole("button", { name: "+1", exact: true }).click();
+  await page.getByRole("button", { name: "+ 10 машин" }).click();
   expect(await page.evaluate(async () =>
-    (await import("/src/stores/editor.ts")).useEditorStore().vehicleCount)).toBe(1);
+    (await import("/src/stores/editor.ts")).useEditorStore().vehicleCount)).toBe(10);
   await page.keyboard.press("Space");
   expect(await page.evaluate(async () =>
     (await import("/src/stores/editor.ts")).useEditorStore().trafficRunning)).toBe(false);

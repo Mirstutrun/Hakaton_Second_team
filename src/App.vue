@@ -54,20 +54,23 @@ function keyboard(event: KeyboardEvent) {
     )
   )
     return;
+  const key = event.code.startsWith("Key")
+    ? event.code.slice(3).toLowerCase()
+    : event.key.toLowerCase();
   if (event.ctrlKey || event.metaKey) {
-    if (event.key.toLowerCase() === "z") {
+    if (key === "z") {
       event.preventDefault();
       event.shiftKey ? store.redo() : store.undo();
     }
-    if (event.key.toLowerCase() === "y") {
+    if (key === "y") {
       event.preventDefault();
       store.redo();
     }
-    if (event.key.toLowerCase() === "o") {
+    if (key === "o") {
       event.preventDefault();
       input.value?.click();
     }
-    if (event.key.toLowerCase() === "s") {
+    if (key === "s") {
       event.preventDefault();
       store.exportOsm();
     }
@@ -85,10 +88,9 @@ function keyboard(event: KeyboardEvent) {
     store.trafficRunning = !store.trafficRunning;
     return;
   }
-  if (event.key.toLowerCase() === "c" && store.document) {
+  if (key === "c" && store.document && event.shiftKey) {
     event.preventDefault();
-    if (event.shiftKey) store.vehicleAddBatchRequest++;
-    else store.vehicleAddRequest++;
+    store.vehicleAddBatchRequest++;
     return;
   }
   if (event.key === "Escape") {
@@ -98,9 +100,9 @@ function keyboard(event: KeyboardEvent) {
     store.tool = "select";
   }
   if (event.key === "Enter" && store.tool === "draw") store.finishRoad();
-  if (event.key.toLowerCase() === "f") store.focusRequest++;
+  if (key === "f") store.focusRequest++;
   const tool = editorTools.find(
-    (tool) => tool.key.toLowerCase() === event.key.toLowerCase(),
+    (tool) => tool.key.toLowerCase() === key,
   );
   if (tool) {
     store.tool = tool.id;
@@ -130,8 +132,8 @@ onBeforeUnmount(() => {
       <a class="brand" href="#" aria-label="RoadForge"
         ><span class="brand-mark">R</span
         ><span
-          >roadforge<span class="brand-3d">3D</span
-          ><small>OSM · 2D / 3D</small></span
+          >Дороги<span class="brand-3d">Иркутск</span
+          ><small>РЕДАКТОР ДОРОЖНОЙ СЕТИ</small></span
         ></a
       >
       <div class="document-name">
@@ -158,13 +160,13 @@ onBeforeUnmount(() => {
         ><span class="action-divider"></span
         ><button @click="loadExample">Пример</button
         ><button @click="input?.click()">
-          <AppIcon name="import" /> Импорт</button
+          <AppIcon name="import" /> Открыть карту</button
         ><button
           class="primary"
           :disabled="!store.document"
           @click="store.exportOsm()"
         >
-          Экспорт OSM <AppIcon name="export" /></button
+          Сохранить карту <AppIcon name="export" /></button
         ><input
           ref="input"
           data-testid="file-input"
