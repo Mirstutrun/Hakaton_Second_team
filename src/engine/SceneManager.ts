@@ -36,6 +36,7 @@ export class SceneManager {
   private wayMeshes = new Map<string, Mesh[]>();
   private signalMeshes = new Map<string, Mesh[]>();
   private handles: Mesh[] = [];
+  private issueMeshes: Mesh[] = [];
   private preview: Mesh | null = null;
   private drag: {
     id: string;
@@ -95,12 +96,15 @@ export class SceneManager {
       pole: "#263f45",
       lamp: "#7dffb5",
       line: "#d8e9cc",
+      issueCrossing: "#ffb968",
+      issueBuilding: "#ff6e84",
+      issueGap: "#aee1ff",
     })) {
       const material = new StandardMaterial(name, this.scene);
       material.diffuseColor = Color3.FromHexString(color);
       material.specularColor = Color3.Black();
       material.backFaceCulling = false;
-      if (["selected", "handle", "lamp"].includes(name))
+      if (["selected", "handle", "lamp", "issueCrossing", "issueBuilding", "issueGap"].includes(name))
         material.emissiveColor = material.diffuseColor.scale(0.4);
       this.materials[name] = material;
     }
@@ -157,6 +161,7 @@ export class SceneManager {
     this.camera.setTarget(Vector3.Zero());
     this.camera.radius = 1550;
     this.refreshSelection();
+    this.refreshIssues();
     this.visibility();
   }
 
@@ -242,7 +247,33 @@ export class SceneManager {
     }
     for (const id of nodes) this.refreshSignal(id);
     this.refreshSelection();
+    this.refreshIssues();
     this.visibility();
+  }
+
+  private refreshIssues() {
+    this.issueMeshes.forEach((mesh) => mesh.dispose());
+    this.issueMeshes = [];
+    if (!this.document) return;
+    for (const issue of this.store.geometryIssues) {
+      if (!issue.coordinate || !issue.id || !issue.elementType || issue.code === "limit") continue;
+      const point = this.projection.project(issue.coordinate);
+      const marker = MeshBuilder.CreateSphere(
+        `issue:${issue.code}:${issue.id}`,
+        { diameter: 4.8, segments: 8 },
+        this.scene,
+      );
+      marker.position = new Vector3(point.x, 3, point.z);
+      marker.material = this.materials[
+        issue.code === "road-building-overlap" ? "issueBuilding"
+          : issue.code === "near-disconnection" ? "issueGap" : "issueCrossing"
+      ];
+      marker.metadata = {
+        type: issue.elementType === "node" ? "node" : "way",
+        id: issue.id, role: "issue",
+      };
+      this.issueMeshes.push(marker);
+    }
   }
 
   refreshSelection() {
@@ -520,7 +551,7 @@ export class SceneManager {
     const pick = this.scene.pick(
       this.scene.pointerX,
       this.scene.pointerY,
-      (mesh) => ["road", "handle", "signal"].includes(mesh.metadata?.role),
+      (mesh) => ["road", "handle", "signal", "issue"].includes(mesh.metadata?.role),
     );
     const metadata = pick?.pickedMesh?.metadata;
     if (this.store.tool === "draw") {
