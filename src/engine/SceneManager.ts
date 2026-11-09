@@ -38,6 +38,7 @@ export class SceneManager {
   private projection = createProjection({ lat: 52.26, lon: 104.26 });
   private wayMeshes = new Map<string, Mesh[]>();
   private signalMeshes = new Map<string, Mesh[]>();
+  private junctionCounts = new Map<string, number>();
   private handles: Mesh[] = [];
   private issueMeshes: Mesh[] = [];
   private preview: Mesh | null = null;
@@ -179,6 +180,7 @@ export class SceneManager {
     this.signalMeshes.clear();
     this.clearVehicles();
     this.traffic = new TrafficModel(document);
+    this.rebuildJunctionCounts();
     for (const id of document.ways.keys()) this.refreshWay(id);
     for (const id of document.nodes.keys()) this.refreshSignal(id);
     this.camera.setTarget(Vector3.Zero());
@@ -189,13 +191,37 @@ export class SceneManager {
     this.visibility();
   }
 
+  private rebuildJunctionCounts() {
+    this.junctionCounts.clear();
+    if (!this.document) return;
+    for (const way of this.document.ways.values()) {
+      if (!tagsOf(way).highway) continue;
+      for (const id of new Set(refsOf(way)))
+        this.junctionCounts.set(id, (this.junctionCounts.get(id) ?? 0) + 1);
+    }
+  }
+
+  private protectedCorners(refs: string[]): ReadonlySet<number> {
+    const indices = new Set<number>();
+    for (let index = 1; index < refs.length - 1; index++) {
+      const id = refs[index];
+      const node = this.document?.nodes.get(id);
+      const tags = node ? tagsOf(node) : {};
+      if ((this.junctionCounts.get(id) ?? 0) > 1 ||
+          tags.highway === "traffic_signals" || tags.barrier || tags.railway)
+        indices.add(index);
+    }
+    return indices;
+  }
+
   private refreshWay(id: string) {
     this.wayMeshes.get(id)?.forEach((mesh) => mesh.dispose());
     this.wayMeshes.delete(id);
     const way = this.document?.ways.get(id);
     if (!way) return;
     const tags = tagsOf(way);
-    const points = refsOf(way)
+    const refs = refsOf(way);
+    const points = refs
       .map((ref) => this.point(ref))
       .filter((point): point is Vector3 => point !== null);
     const meshes: Mesh[] = [];
@@ -209,6 +235,7 @@ export class SceneManager {
           this.scene,
           this.materials[style.pedestrian ? "pedestrian" : "asphalt"],
           this.materials.line,
+          this.protectedCorners(refs),
         ),
       );
     }
@@ -259,6 +286,7 @@ export class SceneManager {
         .filter((change) => change.type === "way")
         .map((change) => change.id),
     );
+    this.rebuildJunctionCounts();
     if (nodes.size)
       for (const [id, way] of this.document.ways)
         if (refsOf(way).some((ref) => nodes.has(ref))) ways.add(id);
@@ -395,6 +423,7 @@ export class SceneManager {
         this.laneHighlight = selectedLaneMesh(
           selected.id, points, tagsOf(way), this.store.selectedLane,
           this.scene, this.materials.selectedLane,
+          this.protectedCorners(refsOf(way)),
         );
       }
     }
