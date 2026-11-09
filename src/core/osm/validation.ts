@@ -1,4 +1,4 @@
-import { childElements } from "./model";
+import { childElements, type Coordinate } from "./model";
 import {
   coordinateOf,
   elements,
@@ -12,6 +12,17 @@ export interface ValidationIssue {
   severity: "error" | "warning";
   message: string;
   id?: string;
+  elementType?: "node" | "way" | "relation";
+  code?: string;
+  coordinate?: Coordinate;
+  fix?: {
+    kind: "connect-crossing";
+    wayA: string;
+    indexA: number;
+    wayB: string;
+    indexB: number;
+    coordinate: Coordinate;
+  };
 }
 
 export function validateOsm(document: OsmDocument): ValidationIssue[] {
