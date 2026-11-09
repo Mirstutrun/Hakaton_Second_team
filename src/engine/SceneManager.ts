@@ -282,7 +282,9 @@ export class SceneManager {
 
   addVehicles(count: number) {
     if (!this.traffic) return;
-    for (const id of this.traffic.add(count)) {
+    const wayId = this.store.selection?.type === "way"
+      ? this.store.selection.id : undefined;
+    for (const id of this.traffic.add(count, wayId)) {
       const vehicle = this.traffic.cars.get(id)!;
       const mesh = MeshBuilder.CreateBox(`vehicle:${id}`,
         { width: 1.8, height: 1.25, depth: 4.1 }, this.scene);
