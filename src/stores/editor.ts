@@ -21,8 +21,17 @@ export const useEditorStore = defineStore("editor", () => {
   const lastPatch = shallowRef<EditPatch | null>(null);
   const selection = ref<Selection | null>(null);
   const selectedVertex = ref<string | null>(null);
+  const selectedLane = ref<number | null>(null);
+  const vehicleAddRequest = ref(0);
+  const vehicleAddBatchRequest = ref(0);
+  const vehicleDeleteRequest = ref(0);
+  const vehicleClearRequest = ref(0);
+  const selectedVehicle = ref<string | null>(null);
+  const vehicleCount = ref(0);
+  const trafficRunning = ref(true);
+  const trafficSpeed = ref(1);
   const tool = ref<EditorTool>("select");
-  const view = ref<"3d" | "2d">("3d");
+  const view = ref<"3d" | "2d">("2d");
   const buildings = ref(true);
   const markings = ref(true);
   const pedestrians = ref(true);
@@ -86,6 +95,10 @@ export const useEditorStore = defineStore("editor", () => {
       cursor.value = savedCursor.value = 0;
       selection.value = null;
       selectedVertex.value = null;
+      selectedLane.value = null;
+      selectedVehicle.value = null;
+      vehicleCount.value = 0;
+      trafficRunning.value = true;
       draft.value = [];
       lastPatch.value = null;
       revision.value++;
@@ -168,6 +181,7 @@ export const useEditorStore = defineStore("editor", () => {
   function selectOsmElement(target: Selection | null) {
     selection.value = target;
     selectedVertex.value = target?.type === "node" ? target.id : null;
+    selectedLane.value = null;
   }
 
   return {
@@ -176,6 +190,15 @@ export const useEditorStore = defineStore("editor", () => {
     lastPatch,
     selection,
     selectedVertex,
+    selectedLane,
+    selectedVehicle,
+    vehicleAddRequest,
+    vehicleAddBatchRequest,
+    vehicleDeleteRequest,
+    vehicleClearRequest,
+    vehicleCount,
+    trafficRunning,
+    trafficSpeed,
     selected,
     tool,
     view,

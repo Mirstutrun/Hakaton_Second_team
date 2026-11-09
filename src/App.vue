@@ -59,13 +59,41 @@ function keyboard(event: KeyboardEvent) {
       event.preventDefault();
       event.shiftKey ? store.redo() : store.undo();
     }
+    if (event.key.toLowerCase() === "y") {
+      event.preventDefault();
+      store.redo();
+    }
+    if (event.key.toLowerCase() === "o") {
+      event.preventDefault();
+      input.value?.click();
+    }
     if (event.key.toLowerCase() === "s") {
       event.preventDefault();
       store.exportOsm();
     }
     return;
   }
+  if (event.key === "Delete" || event.key === "Backspace") {
+    if (store.selectedVehicle) {
+      event.preventDefault();
+      store.vehicleDeleteRequest++;
+    }
+    return;
+  }
+  if (event.key === " " && store.document) {
+    event.preventDefault();
+    store.trafficRunning = !store.trafficRunning;
+    return;
+  }
+  if (event.key.toLowerCase() === "c" && store.document) {
+    event.preventDefault();
+    if (event.shiftKey) store.vehicleAddBatchRequest++;
+    else store.vehicleAddRequest++;
+    return;
+  }
   if (event.key === "Escape") {
+    store.selectedVehicle = null;
+    store.selectedLane = null;
     store.draft = [];
     store.tool = "select";
   }
@@ -103,7 +131,7 @@ onBeforeUnmount(() => {
         ><span class="brand-mark">R</span
         ><span
           >roadforge<span class="brand-3d">3D</span
-          ><small>ДОРОЖНАЯ СЕТЬ. ПОД ВАШИМ КОНТРОЛЕМ.</small></span
+          ><small>OSM · 2D / 3D</small></span
         ></a
       >
       <div class="document-name">

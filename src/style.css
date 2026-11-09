@@ -910,3 +910,39 @@ button svg {
   color: #b4cbc0; overflow-wrap: anywhere;
 }
 .advanced-tag-row button { padding: 5px 2px; font-size: 13px; }
+
+/* Lane-focused editing */
+.lane-picker { display: flex; gap: 6px; margin: 11px 0 12px; flex-wrap: wrap; }
+.lane-picker button {
+  min-width: 34px; padding: 9px 8px; font-weight: 700;
+  border-radius: 6px; border: 1px solid #415b54; background: #203530;
+}
+.lane-picker button.lane-active {
+  background: #bdf5c9; color: #123728; border-color: #cbffe0;
+  box-shadow: 0 0 0 2px #97ffc733;
+}
+.lane-settings { display: grid; gap: 11px; margin-bottom: 16px; }
+.lane-settings label { display: grid; gap: 6px; color: #b1c8c0; font-size: 11px; }
+.lane-settings select, .lane-settings input { padding: 9px; }
+.traffic-dock {
+  position: absolute; bottom: 20px; left: 17px;
+  z-index: 5; width: 284px; pointer-events: auto;
+  padding: 12px 13px; border: 1px solid #45665e;
+  background: #15282bea; border-radius: 10px;
+  box-shadow: 0 16px 40px #0007; backdrop-filter: blur(12px);
+  color: #e1f1e7;
+}
+.traffic-title { display: flex; align-items: center; gap: 7px; font-weight: 700; font-size: 12px; margin-bottom: 9px; }
+.traffic-title strong { margin-left: auto; font-variant-numeric: tabular-nums; color: #b7eac6; }
+.traffic-led { width: 7px; height: 7px; border-radius: 50%; background: #8fe9b4; box-shadow: 0 0 10px #8fe9b4a0; }
+.traffic-buttons { display: flex; flex-wrap: wrap; gap: 5px; }
+.traffic-buttons button { flex: 1; min-width: 40px; white-space: nowrap; padding: 7px 6px; font-size: 10px; }
+.traffic-speed { display: flex; align-items: center; gap: 10px; margin-top: 11px; font-size: 10px; color: #a6c7b6; }
+.traffic-speed input { padding: 0; accent-color: #b5edc3; flex: 1; }
+.traffic-dock > small { display: block; margin-top: 8px; line-height: 1.4; font-size: 9px; color: #9caeaa; }
+@media (max-width: 820px) {
+  .traffic-dock { width: min(250px, 65vw); bottom: 9px; left: 9px; padding: 9px; }
+  .traffic-buttons { gap: 3px; }
+  .traffic-buttons button { min-width: 35px; padding: 6px 4px; }
+  .traffic-dock > small { display: none; }
+}

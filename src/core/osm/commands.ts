@@ -1,4 +1,5 @@
 import { childElements } from "./model";
+import { createProjection } from "../geo/projection";
 import {
   coordinateOf,
   elements,
@@ -26,6 +27,7 @@ export type EditCommand =
   | { type: "delete-way"; id: string }
   | { type: "add-signal"; wayId: string; index: number; point: RoadPoint }
   | { type: "remove-signal"; id: string }
+  | { type: "smooth-road"; wayId: string; radius?: number }
   | {
       type: "connect-crossing";
       wayA: string;
@@ -314,6 +316,79 @@ export function applyEdit(
           );
         setTags("node", id, { highway: "traffic_signals" });
         patch.selection = { type: "node", id };
+        break;
+      }
+      case "smooth-road": {
+        const way = requireElement(document, "way", command.wayId);
+        const refs = refsOf(way);
+        if (!tagsOf(way).highway || refs.length < 3 ||
+            refs[0] === refs[refs.length - 1])
+          throw new Error("Для сглаживания выберите незамкнутую дорогу с изгибами");
+        const radius = Math.max(1, Math.min(command.radius ?? 8, 30));
+        const projection = createProjection(coordinateOf(
+          requireElement(document, "node", refs[Math.floor(refs.length / 2)])));
+        const projected = refs.map((id) =>
+          projection.project(coordinateOf(requireElement(document, "node", id))));
+        const occurrences = new Map<string, number>();
+        for (const candidate of document.ways.values())
+          for (const id of new Set(refsOf(candidate)))
+            occurrences.set(id, (occurrences.get(id) ?? 0) + 1);
+        const relationRefs = new Set<string>();
+        for (const relation of document.relations.values())
+          for (const member of childElements(relation))
+            if (member.tagName === "member" && member.getAttribute("type") === "node")
+              relationRefs.add(member.getAttribute("ref")!);
+        const result: string[] = [refs[0]];
+        let corners = 0;
+        for (let i = 1; i < refs.length - 1; i++) {
+          const id = refs[i];
+          const node = requireElement(document, "node", id);
+          const point = projected[i], before = projected[i - 1], after = projected[i + 1];
+          const ax = point.x - before.x, az = point.z - before.z;
+          const bx = after.x - point.x, bz = after.z - point.z;
+          const la = Math.hypot(ax, az), lb = Math.hypot(bx, bz);
+          const dot = (ax * bx + az * bz) / (la * lb || 1);
+          const protectedNode = (occurrences.get(id) ?? 0) > 1 ||
+            refs.indexOf(id) !== refs.lastIndexOf(id) ||
+            relationRefs.has(id) || Object.keys(tagsOf(node)).length > 0;
+          const trim = Math.min(radius, la * 0.32, lb * 0.32);
+          if (protectedNode || dot > 0.96 || dot < -0.98 ||
+              trim < 0.5 || !Number.isFinite(trim)) {
+            result.push(id);
+            continue;
+          }
+          if (corners >= 80)
+            throw new Error("Слишком много изгибов в одном действии. Разделите дорогу на участки.");
+          corners++;
+          const p0 = { x: point.x - ax / la * trim,
+            z: point.z - az / la * trim };
+          const p2 = { x: point.x + bx / lb * trim,
+            z: point.z + bz / lb * trim };
+          for (let step = 0; step <= 6; step++) {
+            const t = step / 6, s = 1 - t;
+            const coordinate = projection.unproject({
+              x: p0.x * s * s + point.x * 2 * s * t + p2.x * t * t,
+              z: p0.z * s * s + point.z * 2 * s * t + p2.z * t * t,
+            });
+            const fresh = newElement("node");
+            fresh.setAttribute("lat", coordinate.lat.toFixed(9));
+            fresh.setAttribute("lon", coordinate.lon.toFixed(9));
+            result.push(fresh.getAttribute("id")!);
+          }
+        }
+        if (!corners) throw new Error(
+          "Нет сглаживаемых поворотов. Общие перекрёстки и значимые узлы защищены.");
+        result.push(refs[refs.length - 1]);
+        touch("way", command.wayId);
+        for (const nd of childElements(way).filter((item) => item.tagName === "nd"))
+          nd.remove();
+        const beforeTags = childElements(way).find((item) => item.tagName === "tag") ?? null;
+        for (const id of result) {
+          const nd = document.xml.createElement("nd");
+          nd.setAttribute("ref", id);
+          way.insertBefore(nd, beforeTags);
+        }
+        patch.selection = { type: "way", id: command.wayId };
         break;
       }
       case "connect-crossing": {
