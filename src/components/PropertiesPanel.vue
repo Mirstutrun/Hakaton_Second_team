@@ -138,6 +138,12 @@ function remove() {
   if (patch) store.selectOsmElement(null);
   confirmDelete.value = false;
 }
+function smoothSelectedRoad() {
+  if (store.selection?.type !== "way") return;
+  if (!window.confirm("Сгладить внутренние повороты OSM-дороги? Общие перекрёстки и светофоры сохранятся. Действие можно отменить Ctrl+Z."))
+    return;
+  store.execute({ type: "smooth-road", wayId: store.selection.id, radius: 8 });
+}
 function removeVertex() {
   if (!store.selection || !store.selectedVertex) return;
   if (
@@ -392,6 +398,9 @@ function removeVertex() {
         <div class="section-label">
           ГЕОМЕТРИЯ · {{ nodeRefs.length }} ВЕРШИН
         </div>
+        <button class="full-width" @click="smoothSelectedRoad">
+          Скруглить повороты (OSM)
+        </button>
         <label class="vertex-label"
           >Активный узел<select
             v-model="store.selectedVertex"
