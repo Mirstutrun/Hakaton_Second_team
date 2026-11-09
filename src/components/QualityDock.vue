@@ -48,7 +48,25 @@ function locate(index: number) {
   if (type === "node" && !store.document?.nodes.has(issue.id)) return;
   if (type === "way" && !store.document?.ways.has(issue.id)) return;
   store.selectOsmElement({ type, id: issue.id });
+  store.focusCoordinate = issue.coordinate ?? null;
   store.focusRequest++;
+}
+function downloadReport() {
+  const report = {
+    project: "RoadForge 3D",
+    source: store.fileName,
+    generatedAt: new Date().toISOString(),
+    note: "Warnings are heuristics, not verified ground truth; no automatic edits were made.",
+    issues: issueList.value,
+  };
+  const url = URL.createObjectURL(new Blob(
+    [JSON.stringify(report, null, 2)], { type: "application/json" },
+  ));
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = store.fileName.replace(/\\.(osm|xml)$/i, "") + "-geometry-audit.json";
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 function repair(index: number) {
   const issue = issueList.value[index];
@@ -101,6 +119,9 @@ function repair(index: number) {
           </div>
         </article>
       </div>
+      <button class="qa-more" :disabled="!store.document" @click="downloadReport">
+        Скачать отчёт JSON
+      </button>
       <button v-if="issueList.length > 35" class="qa-more" @click="showAll = !showAll">
         {{ showAll ? "Свернуть" : "Показать все предупреждения" }}
       </button>
