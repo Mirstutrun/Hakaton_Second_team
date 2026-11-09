@@ -25,7 +25,15 @@ export type EditCommand =
   | { type: "remove-vertex"; wayId: string; index: number }
   | { type: "delete-way"; id: string }
   | { type: "add-signal"; wayId: string; index: number; point: RoadPoint }
-  | { type: "remove-signal"; id: string };
+  | { type: "remove-signal"; id: string }
+  | {
+      type: "connect-crossing";
+      wayA: string;
+      indexA: number;
+      wayB: string;
+      indexB: number;
+      coordinate: Coordinate;
+    };
 
 export function applyPatch(
   document: OsmDocument,
@@ -288,6 +296,69 @@ export function applyEdit(
             "Узел уже содержит highway. Выберите свободный участок рядом.",
           );
         setTags("node", id, { highway: "traffic_signals" });
+        patch.selection = { type: "node", id };
+        break;
+      }
+      case "connect-crossing": {
+        const { wayA, wayB, indexA, indexB, coordinate } = command;
+        if (wayA === wayB) throw new Error("Нужны две разные дороги");
+        checkCoordinate(coordinate);
+        const first = requireElement(document, "way", wayA);
+        const second = requireElement(document, "way", wayB);
+        const firstTags = tagsOf(first);
+        const secondTags = tagsOf(second);
+        if (!firstTags.highway || !secondTags.highway)
+          throw new Error("Соединять можно только дороги");
+        const surface = (tags: Tags) =>
+          !((tags.bridge && tags.bridge !== "no") ||
+            (tags.tunnel && tags.tunnel !== "no") || tags.covered === "yes" ||
+            tags.indoor === "yes");
+        if (!surface(firstTags) || !surface(secondTags) ||
+            Number(firstTags.layer || 0) !== Number(secondTags.layer || 0))
+          throw new Error("Нельзя соединять разные уровни или мосты/тоннели");
+        const projection = (point: Coordinate) => {
+          const scale = 111319.49079327358;
+          return {
+            x: point.lon * scale * Math.cos(coordinate.lat * Math.PI / 180),
+            y: point.lat * scale,
+          };
+        };
+        const near = (a: Coordinate, b: Coordinate) => {
+          const p = projection(a), q = projection(b);
+          return Math.hypot(p.x - q.x, p.y - q.y);
+        };
+        const segment = (way: Element, index: number) => {
+          const refs = refsOf(way);
+          if (!Number.isInteger(index) || index < 1 || index >= refs.length)
+            throw new Error("Сегмент изменился. Запустите проверку повторно");
+          const a = coordinateOf(requireElement(document, "node", refs[index - 1]));
+          const b = coordinateOf(requireElement(document, "node", refs[index]));
+          if (near(a, coordinate) < 0.75 || near(b, coordinate) < 0.75)
+            throw new Error("Пересечение у конца сегмента: соедините узлы вручную");
+          const p = projection(coordinate), u = projection(a), v = projection(b);
+          const dx = v.x - u.x, dy = v.y - u.y;
+          const t = ((p.x - u.x) * dx + (p.y - u.y) * dy) /
+            (dx * dx + dy * dy || 1);
+          const distance = Math.hypot(p.x - (u.x + t * dx), p.y - (u.y + t * dy));
+          if (t <= 0 || t >= 1 || distance > 0.35)
+            throw new Error("Пересечение больше не лежит на сегменте");
+          return refs;
+        };
+        const refsA = segment(first, indexA);
+        const refsB = segment(second, indexB);
+        if (refsA.some((id) => refsB.includes(id)))
+          throw new Error("Дороги уже соединены общим узлом");
+        const node = newElement("node");
+        node.setAttribute("lat", coordinate.lat.toFixed(9));
+        node.setAttribute("lon", coordinate.lon.toFixed(9));
+        const id = node.getAttribute("id")!;
+        for (const [way, index] of [[first, indexA], [second, indexB]] as const) {
+          touch("way", way.getAttribute("id")!);
+          const refs = childElements(way).filter((element) => element.tagName === "nd");
+          const nd = document.xml.createElement("nd");
+          nd.setAttribute("ref", id);
+          way.insertBefore(nd, refs[index]);
+        }
         patch.selection = { type: "node", id };
         break;
       }
