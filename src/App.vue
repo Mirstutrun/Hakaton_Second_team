@@ -54,20 +54,23 @@ function keyboard(event: KeyboardEvent) {
     )
   )
     return;
+  const key = event.code.startsWith("Key")
+    ? event.code.slice(3).toLowerCase()
+    : event.key.toLowerCase();
   if (event.ctrlKey || event.metaKey) {
-    if (event.key.toLowerCase() === "z") {
+    if (key === "z") {
       event.preventDefault();
       event.shiftKey ? store.redo() : store.undo();
     }
-    if (event.key.toLowerCase() === "y") {
+    if (key === "y") {
       event.preventDefault();
       store.redo();
     }
-    if (event.key.toLowerCase() === "o") {
+    if (key === "o") {
       event.preventDefault();
       input.value?.click();
     }
-    if (event.key.toLowerCase() === "s") {
+    if (key === "s") {
       event.preventDefault();
       store.exportOsm();
     }
@@ -85,7 +88,7 @@ function keyboard(event: KeyboardEvent) {
     store.trafficRunning = !store.trafficRunning;
     return;
   }
-  if (event.key.toLowerCase() === "c" && store.document && event.shiftKey) {
+  if (key === "c" && store.document && event.shiftKey) {
     event.preventDefault();
     store.vehicleAddBatchRequest++;
     return;
@@ -97,9 +100,9 @@ function keyboard(event: KeyboardEvent) {
     store.tool = "select";
   }
   if (event.key === "Enter" && store.tool === "draw") store.finishRoad();
-  if (event.key.toLowerCase() === "f") store.focusRequest++;
+  if (key === "f") store.focusRequest++;
   const tool = editorTools.find(
-    (tool) => tool.key.toLowerCase() === event.key.toLowerCase(),
+    (tool) => tool.key.toLowerCase() === key,
   );
   if (tool) {
     store.tool = tool.id;
