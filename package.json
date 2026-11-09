@@ -11,7 +11,9 @@
     "build": "vue-tsc --noEmit && vite build",
     "preview": "vite preview --host 0.0.0.0",
     "test": "vitest run",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "postinstall": "node scripts/repair-babylon-sourcemaps.mjs",
+    "predev": "node scripts/repair-babylon-sourcemaps.mjs"
   },
   "dependencies": {
     "@babylonjs/core": "^8.0.0",
