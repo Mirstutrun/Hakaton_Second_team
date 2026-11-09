@@ -12,7 +12,7 @@ const issueList = computed(() => store.geometryIssues);
 const counts = computed(() => ({
   crossings: issueList.value.filter((issue) => issue.code === "unconnected-crossing").length,
   buildings: issueList.value.filter((issue) => issue.code === "road-building-overlap").length,
-  gaps: issueList.value.filter((issue) => issue.code === "near-disconnection").length,
+  gaps: issueList.value.filter((issue) => (issue.code === "near-disconnection" || issue.code === "isolated-component")).length,
 }));
 const center = computed(() => {
   store.revision;
