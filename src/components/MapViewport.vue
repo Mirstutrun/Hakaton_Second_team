@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { SceneManager } from "../engine/SceneManager";
+import QualityDock from "./QualityDock.vue";
 import { useEditorStore } from "../stores/editor";
 
 const canvas = ref<HTMLCanvasElement>();
@@ -85,6 +86,7 @@ onBeforeUnmount(() => manager?.dispose());
         ⌖
       </button>
     </div>
+    <QualityDock />
     <div v-if="store.loading" class="loading">
       <div class="spinner"></div>
       Подготовка дорожной сети…
