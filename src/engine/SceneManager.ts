@@ -375,6 +375,13 @@ export class SceneManager {
   }
 
   focus() {
+    if (this.store.focusCoordinate) {
+      const point = this.projection.project(this.store.focusCoordinate);
+      this.camera.setTarget(new Vector3(point.x, 0, point.z));
+      this.camera.radius = 130;
+      this.store.focusCoordinate = null;
+      return;
+    }
     const selected = this.store.selection;
     const way =
       selected?.type === "way" ? this.document?.ways.get(selected.id) : null;
