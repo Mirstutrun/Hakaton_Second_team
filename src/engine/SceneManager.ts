@@ -189,6 +189,7 @@ export class SceneManager {
     this.refreshSelection();
     this.refreshIssues();
     this.visibility();
+    this.addVehicles(18);
   }
 
   private rebuildJunctionCounts() {
