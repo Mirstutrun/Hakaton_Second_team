@@ -22,7 +22,10 @@ import {
   type OsmDocument,
   type RoadPoint,
 } from "../core/osm/model";
-import { buildRoad, roadStyle } from "./geometry/roads";
+import {
+  buildRoad, laneCenterline, roadStyle, selectedLaneMesh, smoothRoadPoints,
+} from "./geometry/roads";
+import { TrafficModel } from "./TrafficModel";
 import { buildBuilding } from "./geometry/buildings";
 import { buildSignal } from "./geometry/signals";
 import type { useEditorStore } from "../stores/editor";
@@ -38,6 +41,10 @@ export class SceneManager {
   private handles: Mesh[] = [];
   private issueMeshes: Mesh[] = [];
   private preview: Mesh | null = null;
+  private laneHighlight: Mesh | null = null;
+  private traffic: TrafficModel | null = null;
+  private vehicleMeshes = new Map<string, Mesh>();
+  private vehicleMaterials: StandardMaterial[] = [];
   private drag: {
     id: string;
     plane: Plane;
@@ -91,6 +98,8 @@ export class SceneManager {
       pedestrian: "#67766a",
       building: "#667d82",
       selected: "#20c99c",
+      selectedLane: "#d0ffc0",
+      selectedVehicle: "#f6e391",
       handle: "#baffd8",
       ground: "#18292c",
       pole: "#263f45",
@@ -104,9 +113,17 @@ export class SceneManager {
       material.diffuseColor = Color3.FromHexString(color);
       material.specularColor = Color3.Black();
       material.backFaceCulling = false;
-      if (["selected", "handle", "lamp", "issueCrossing", "issueBuilding", "issueGap"].includes(name))
+      if (["selected", "selectedLane", "selectedVehicle", "handle", "lamp", "issueCrossing", "issueBuilding", "issueGap"].includes(name))
         material.emissiveColor = material.diffuseColor.scale(0.4);
       this.materials[name] = material;
+    }
+    for (const [index, hex] of [
+      "#e8e8e2", "#f5ac59", "#8cc6e9", "#ef7773", "#b8a1e4", "#99ca9b",
+    ].entries()) {
+      const paint = new StandardMaterial(`car-${index}`, this.scene);
+      paint.diffuseColor = Color3.FromHexString(hex);
+      paint.specularColor = Color3.FromHexString("#47515a");
+      this.vehicleMaterials.push(paint);
     }
     const ground = MeshBuilder.CreateGround(
       "ground",
@@ -133,7 +150,10 @@ export class SceneManager {
     this.scene.onPointerObservable.add((info) =>
       this.pointer(info.type, info.event as PointerEvent),
     );
-    this.scene.onBeforeRenderObservable.add(() => this.updateOrtho());
+    this.scene.onBeforeRenderObservable.add(() => {
+      this.updateOrtho();
+      this.tickTraffic();
+    });
     this.resizeObserver = new ResizeObserver(() => this.engine.resize());
     this.resizeObserver.observe(canvas);
     this.engine.runRenderLoop(() => this.scene.render());
@@ -156,6 +176,8 @@ export class SceneManager {
       meshes.forEach((mesh) => mesh.dispose());
     this.wayMeshes.clear();
     this.signalMeshes.clear();
+    this.clearVehicles();
+    this.traffic = new TrafficModel(document);
     for (const id of document.ways.keys()) this.refreshWay(id);
     for (const id of document.nodes.keys()) this.refreshSignal(id);
     this.camera.setTarget(Vector3.Zero());
@@ -248,7 +270,60 @@ export class SceneManager {
     for (const id of nodes) this.refreshSignal(id);
     this.refreshSelection();
     this.refreshIssues();
+    this.resetTrafficAfterEdit();
     this.visibility();
+  }
+
+  private resetTrafficAfterEdit() {
+    this.clearVehicles();
+    if (this.document) this.traffic = new TrafficModel(this.document);
+  }
+
+  addVehicles(count: number) {
+    if (!this.traffic) return;
+    for (const id of this.traffic.add(count)) {
+      const vehicle = this.traffic.cars.get(id)!;
+      const mesh = MeshBuilder.CreateBox(`vehicle:${id}`,
+        { width: 1.8, height: 1.25, depth: 4.1 }, this.scene);
+      mesh.material = this.vehicleMaterials[vehicle.color % this.vehicleMaterials.length];
+      mesh.metadata = { role: "vehicle", id };
+      this.vehicleMeshes.set(id, mesh);
+    }
+    this.store.vehicleCount = this.traffic.size;
+  }
+
+  deleteSelectedVehicle() {
+    const id = this.store.selectedVehicle;
+    if (!id) return;
+    this.traffic?.remove(id);
+    this.vehicleMeshes.get(id)?.dispose();
+    this.vehicleMeshes.delete(id);
+    this.store.selectedVehicle = null;
+    this.store.vehicleCount = this.traffic?.size ?? 0;
+  }
+
+  clearVehicles() {
+    for (const mesh of this.vehicleMeshes.values()) mesh.dispose();
+    this.vehicleMeshes.clear();
+    this.traffic?.clear();
+    this.store.selectedVehicle = null;
+    this.store.vehicleCount = 0;
+  }
+
+  private tickTraffic() {
+    if (!this.traffic) return;
+    if (this.store.trafficRunning)
+      this.traffic.update(this.engine.getDeltaTime() / 1000, this.store.trafficSpeed);
+    for (const [id, mesh] of this.vehicleMeshes) {
+      const car = this.traffic.cars.get(id);
+      if (!car) continue;
+      const position = this.traffic.pose(car);
+      mesh.position.set(position.x, position.y, position.z);
+      mesh.rotation.y = position.heading;
+      mesh.material = this.store.selectedVehicle === id
+        ? this.materials.selectedVehicle
+        : this.vehicleMaterials[car.color % this.vehicleMaterials.length];
+    }
   }
 
   private refreshIssues() {
@@ -277,6 +352,8 @@ export class SceneManager {
   }
 
   refreshSelection() {
+    this.laneHighlight?.dispose();
+    this.laneHighlight = null;
     this.handles.forEach((mesh) => mesh.dispose());
     this.handles = [];
     if (!this.document) return;
@@ -292,6 +369,17 @@ export class SceneManager {
                   ? "pedestrian"
                   : "asphalt"
               ];
+    }
+    if (selected?.type === "way" && this.store.selectedLane !== null) {
+      const way = this.document.ways.get(selected.id);
+      if (way) {
+        const points = refsOf(way).map((ref) => this.point(ref))
+          .filter((point): point is Vector3 => point !== null);
+        this.laneHighlight = selectedLaneMesh(
+          selected.id, points, tagsOf(way), this.store.selectedLane,
+          this.scene, this.materials.selectedLane,
+        );
+      }
     }
     const ids =
       selected?.type === "way"
@@ -495,6 +583,33 @@ export class SceneManager {
     }
   }
 
+  private laneAtPoint(wayId: string, position: Vector3): number | null {
+    const way = this.document?.ways.get(wayId);
+    if (!way) return null;
+    const style = roadStyle(tagsOf(way));
+    if (style.pedestrian) return null;
+    const points = refsOf(way).map((ref) => this.point(ref))
+      .filter((point): point is Vector3 => point !== null);
+    const smooth = smoothRoadPoints(points);
+    let nearest = Infinity, side = 0;
+    for (let i = 1; i < smooth.length; i++) {
+      const a = smooth[i - 1], b = smooth[i];
+      const dx = b.x - a.x, dz = b.z - a.z;
+      const length2 = dx * dx + dz * dz;
+      if (length2 < 0.0001) continue;
+      const t = Math.max(0, Math.min(1,
+        ((position.x - a.x) * dx + (position.z - a.z) * dz) / length2));
+      const x = a.x + dx * t, z = a.z + dz * t;
+      const distance2 = (position.x - x) ** 2 + (position.z - z) ** 2;
+      if (distance2 < nearest) {
+        nearest = distance2;
+        side = ((position.x - x) * -dz + (position.z - z) * dx) / Math.sqrt(length2);
+      }
+    }
+    return Math.max(0, Math.min(style.lanes - 1,
+      Math.floor((side + style.width / 2) * style.lanes / style.width)));
+  }
+
   private pointer(type: number, event: PointerEvent) {
     if (!this.document) return;
     if (type === PointerEventTypes.POINTERDOWN && event.button === 0) {
@@ -558,7 +673,7 @@ export class SceneManager {
     const pick = this.scene.pick(
       this.scene.pointerX,
       this.scene.pointerY,
-      (mesh) => ["road", "handle", "signal", "issue"].includes(mesh.metadata?.role),
+      (mesh) => ["road", "handle", "signal", "issue", "vehicle"].includes(mesh.metadata?.role),
     );
     const metadata = pick?.pickedMesh?.metadata;
     if (this.store.tool === "draw") {
@@ -593,6 +708,19 @@ export class SceneManager {
           : this.projection.unproject(nearest.point),
       });
     } else if (metadata) {
+      if (metadata.role === "vehicle") {
+        this.store.selectedVehicle = metadata.id;
+        this.store.selectOsmElement(null);
+        return;
+      }
+      this.store.selectedVehicle = null;
+      if (metadata.role === "road" && metadata.type === "way") {
+        this.store.selectOsmElement({ type: "way", id: metadata.id });
+        this.store.selectedLane = pick?.pickedPoint
+          ? this.laneAtPoint(metadata.id, pick.pickedPoint) : null;
+        this.refreshSelection();
+        return;
+      }
       if (metadata.role === "handle" && this.store.selection?.type === "way")
         this.store.selectedVertex = metadata.id;
       else
@@ -604,6 +732,7 @@ export class SceneManager {
   dispose() {
     this.resizeObserver.disconnect();
     this.engine.stopRenderLoop();
+    this.clearVehicles();
     this.scene.dispose();
     this.engine.dispose();
   }
