@@ -59,6 +59,28 @@ describe("geometry quality assurance", () => {
     })).toThrow("уровни");
   });
 
+  it("snaps a near-miss endpoint into a shared OSM node and undoes cleanly", () => {
+    const source = `<osm version="0.6">
+      <node id="1" lat="52.0" lon="104.0"/>
+      <node id="2" lat="52.0" lon="104.0002"/>
+      <node id="3" lat="52.00001" lon="104.0001"/>
+      <node id="4" lat="52.0001" lon="104.0001"/>
+      <way id="10"><nd ref="1"/><nd ref="2"/><tag k="highway" v="residential"/></way>
+      <way id="11"><nd ref="3"/><nd ref="4"/><tag k="highway" v="residential"/></way>
+    </osm>`;
+    const doc = parseOsm(source);
+    const suggestion = auditGeometry(doc).find((issue) =>
+      issue.code === "near-disconnection" && issue.fix?.kind === "attach-endpoint");
+    expect(suggestion?.fix?.kind).toBe("attach-endpoint");
+    if (suggestion?.fix?.kind !== "attach-endpoint") throw new Error("No snap suggestion");
+    const patch = applyEdit(doc, { type: "attach-endpoint", ...suggestion.fix });
+    expect(refsOf(doc.ways.get("10")!)).toContain("3");
+    expect(refsOf(doc.ways.get("11")!)).toContain("3");
+    expect(auditGeometry(doc).some((issue) => issue.code === "near-disconnection")).toBe(false);
+    applyPatch(doc, patch, "before");
+    expect(serializeOsm(doc)).toBe(source);
+  });
+
   it("refuses to create a stale or off-segment junction", () => {
     const doc = parseOsm(crossing);
     const source = serializeOsm(doc);
