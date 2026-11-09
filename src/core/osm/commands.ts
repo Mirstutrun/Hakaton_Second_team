@@ -33,6 +33,13 @@ export type EditCommand =
       wayB: string;
       indexB: number;
       coordinate: Coordinate;
+    }
+  | {
+      type: "attach-endpoint";
+      nodeId: string;
+      targetWayId: string;
+      targetIndex: number;
+      coordinate: Coordinate;
     };
 
 export function applyPatch(
@@ -360,6 +367,70 @@ export function applyEdit(
           way.insertBefore(nd, refs[index]);
         }
         patch.selection = { type: "node", id };
+        break;
+      }
+      case "attach-endpoint": {
+        const { nodeId, targetWayId, targetIndex, coordinate } = command;
+        checkCoordinate(coordinate);
+        const node = requireElement(document, "node", nodeId);
+        const target = requireElement(document, "way", targetWayId);
+        const tags = tagsOf(target);
+        if (!tags.highway || (tags.bridge && tags.bridge !== "no") ||
+            (tags.tunnel && tags.tunnel !== "no") || tags.covered === "yes")
+          throw new Error("Стыковка допускается только на дороге на одном уровне");
+        if (refsOf(target).includes(nodeId))
+          throw new Error("Этот узел уже принадлежит целевой дороге");
+        const owners = Array.from(document.ways.values()).filter((way) =>
+          tagsOf(way).highway && refsOf(way).includes(nodeId));
+        if (owners.length !== 1)
+          throw new Error("Узел должен быть свободным концом ровно одной дороги");
+        const owner = owners[0];
+        const ownerRefs = refsOf(owner);
+        if (ownerRefs[0] !== nodeId &&
+            ownerRefs[ownerRefs.length - 1] !== nodeId)
+          throw new Error("Узел не является концом дороги");
+        const ownerTags = tagsOf(owner);
+        if ((ownerTags.bridge && ownerTags.bridge !== "no") ||
+            (ownerTags.tunnel && ownerTags.tunnel !== "no") ||
+            ownerTags.covered === "yes" ||
+            Number(ownerTags.layer || 0) !== Number(tags.layer || 0))
+          throw new Error("Нельзя соединять дороги на разных уровнях");
+        if (Array.from(document.relations.values()).some((rel) =>
+            childElements(rel).some((member) =>
+              member.tagName === "member" && member.getAttribute("type") === "node" &&
+              member.getAttribute("ref") === nodeId)))
+          throw new Error("Этот узел входит в OSM-отношение; проверьте его вручную");
+        const refs = refsOf(target);
+        if (!Number.isInteger(targetIndex) || targetIndex < 1 ||
+            targetIndex >= refs.length)
+          throw new Error("Целевой сегмент больше не существует");
+        const a = coordinateOf(requireElement(document, "node", refs[targetIndex - 1]));
+        const b = coordinateOf(requireElement(document, "node", refs[targetIndex]));
+        const meters = (p: Coordinate) => {
+          const scale = 111319.49079327358;
+          return { x: p.lon * scale * Math.cos(coordinate.lat * Math.PI / 180),
+            y: p.lat * scale };
+        };
+        const p = meters(coordinate), u = meters(a), v = meters(b);
+        const dx = v.x - u.x, dy = v.y - u.y;
+        const length2 = dx * dx + dy * dy;
+        const t = ((p.x - u.x) * dx + (p.y - u.y) * dy) / (length2 || 1);
+        if (t <= 0 || t >= 1 || Math.sqrt(length2) * Math.min(t, 1 - t) < 0.75 ||
+            Math.hypot(p.x - (u.x + t * dx), p.y - (u.y + t * dy)) > 0.35)
+          throw new Error("Точка привязки не находится внутри сегмента");
+        const original = coordinateOf(node);
+        const old = meters(original);
+        if (Math.hypot(old.x - p.x, old.y - p.y) > 4)
+          throw new Error("Разрыв больше 4 м: проверьте дорогу вручную");
+        touch("node", nodeId);
+        touch("way", targetWayId);
+        node.setAttribute("lat", coordinate.lat.toFixed(9));
+        node.setAttribute("lon", coordinate.lon.toFixed(9));
+        const nds = childElements(target).filter((element) => element.tagName === "nd");
+        const nd = document.xml.createElement("nd");
+        nd.setAttribute("ref", nodeId);
+        target.insertBefore(nd, nds[targetIndex]);
+        patch.selection = { type: "node", id: nodeId };
         break;
       }
       case "remove-signal": {
