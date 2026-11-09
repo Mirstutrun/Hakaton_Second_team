@@ -25,7 +25,22 @@ export type EditCommand =
   | { type: "remove-vertex"; wayId: string; index: number }
   | { type: "delete-way"; id: string }
   | { type: "add-signal"; wayId: string; index: number; point: RoadPoint }
-  | { type: "remove-signal"; id: string };
+  | { type: "remove-signal"; id: string }
+  | {
+      type: "connect-crossing";
+      wayA: string;
+      indexA: number;
+      wayB: string;
+      indexB: number;
+      coordinate: Coordinate;
+    }
+  | {
+      type: "attach-endpoint";
+      nodeId: string;
+      targetWayId: string;
+      targetIndex: number;
+      coordinate: Coordinate;
+    };
 
 export function applyPatch(
   document: OsmDocument,
@@ -74,6 +89,9 @@ function checkTags(tags: Record<string, string | null>): void {
       throw new Error("Некорректное направление дороги");
     if (key === "layer" && !/^-?\d+$/.test(value))
       throw new Error("Уровень должен быть целым числом");
+    if (key === "width" &&
+        (!Number.isFinite(Number(value)) || Number(value) <= 0))
+      throw new Error("Ширина должна быть положительным числом в метрах");
   }
 }
 
@@ -172,6 +190,13 @@ export function applyEdit(
         const backward = Number(combined["lanes:backward"] || 0);
         if (total && forward + backward > total)
           throw new Error("Сумма полос по направлениям превышает общее число");
+        if (combined.oneway === "yes" && backward > 0)
+          throw new Error("Для oneway=yes нельзя указывать встречные полосы");
+        if (combined.oneway === "-1" && forward > 0)
+          throw new Error("Для oneway=-1 нельзя указывать прямые полосы");
+        if (combined.bridge && combined.bridge !== "no" &&
+            combined.tunnel && combined.tunnel !== "no")
+          throw new Error("Объект не может быть одновременно мостом и тоннелем");
         setTags(command.target.type, command.target.id, command.tags);
         break;
       }
@@ -289,6 +314,133 @@ export function applyEdit(
           );
         setTags("node", id, { highway: "traffic_signals" });
         patch.selection = { type: "node", id };
+        break;
+      }
+      case "connect-crossing": {
+        const { wayA, wayB, indexA, indexB, coordinate } = command;
+        if (wayA === wayB) throw new Error("Нужны две разные дороги");
+        checkCoordinate(coordinate);
+        const first = requireElement(document, "way", wayA);
+        const second = requireElement(document, "way", wayB);
+        const firstTags = tagsOf(first);
+        const secondTags = tagsOf(second);
+        if (!firstTags.highway || !secondTags.highway)
+          throw new Error("Соединять можно только дороги");
+        const surface = (tags: Tags) =>
+          !((tags.bridge && tags.bridge !== "no") ||
+            (tags.tunnel && tags.tunnel !== "no") || tags.covered === "yes" ||
+            tags.indoor === "yes");
+        if (!surface(firstTags) || !surface(secondTags) ||
+            Number(firstTags.layer || 0) !== Number(secondTags.layer || 0))
+          throw new Error("Нельзя соединять разные уровни или мосты/тоннели");
+        const projection = (point: Coordinate) => {
+          const scale = 111319.49079327358;
+          return {
+            x: point.lon * scale * Math.cos(coordinate.lat * Math.PI / 180),
+            y: point.lat * scale,
+          };
+        };
+        const near = (a: Coordinate, b: Coordinate) => {
+          const p = projection(a), q = projection(b);
+          return Math.hypot(p.x - q.x, p.y - q.y);
+        };
+        const segment = (way: Element, index: number) => {
+          const refs = refsOf(way);
+          if (!Number.isInteger(index) || index < 1 || index >= refs.length)
+            throw new Error("Сегмент изменился. Запустите проверку повторно");
+          const a = coordinateOf(requireElement(document, "node", refs[index - 1]));
+          const b = coordinateOf(requireElement(document, "node", refs[index]));
+          if (near(a, coordinate) < 0.75 || near(b, coordinate) < 0.75)
+            throw new Error("Пересечение у конца сегмента: соедините узлы вручную");
+          const p = projection(coordinate), u = projection(a), v = projection(b);
+          const dx = v.x - u.x, dy = v.y - u.y;
+          const t = ((p.x - u.x) * dx + (p.y - u.y) * dy) /
+            (dx * dx + dy * dy || 1);
+          const distance = Math.hypot(p.x - (u.x + t * dx), p.y - (u.y + t * dy));
+          if (t <= 0 || t >= 1 || distance > 0.35)
+            throw new Error("Пересечение больше не лежит на сегменте");
+          return refs;
+        };
+        const refsA = segment(first, indexA);
+        const refsB = segment(second, indexB);
+        if (refsA.some((id) => refsB.includes(id)))
+          throw new Error("Дороги уже соединены общим узлом");
+        const node = newElement("node");
+        node.setAttribute("lat", coordinate.lat.toFixed(9));
+        node.setAttribute("lon", coordinate.lon.toFixed(9));
+        const id = node.getAttribute("id")!;
+        for (const [way, index] of [[first, indexA], [second, indexB]] as const) {
+          touch("way", way.getAttribute("id")!);
+          const refs = childElements(way).filter((element) => element.tagName === "nd");
+          const nd = document.xml.createElement("nd");
+          nd.setAttribute("ref", id);
+          way.insertBefore(nd, refs[index]);
+        }
+        patch.selection = { type: "node", id };
+        break;
+      }
+      case "attach-endpoint": {
+        const { nodeId, targetWayId, targetIndex, coordinate } = command;
+        checkCoordinate(coordinate);
+        const node = requireElement(document, "node", nodeId);
+        const target = requireElement(document, "way", targetWayId);
+        const tags = tagsOf(target);
+        if (!tags.highway || (tags.bridge && tags.bridge !== "no") ||
+            (tags.tunnel && tags.tunnel !== "no") || tags.covered === "yes")
+          throw new Error("Стыковка допускается только на дороге на одном уровне");
+        if (refsOf(target).includes(nodeId))
+          throw new Error("Этот узел уже принадлежит целевой дороге");
+        const owners = Array.from(document.ways.values()).filter((way) =>
+          tagsOf(way).highway && refsOf(way).includes(nodeId));
+        if (owners.length !== 1)
+          throw new Error("Узел должен быть свободным концом ровно одной дороги");
+        const owner = owners[0];
+        const ownerRefs = refsOf(owner);
+        if (ownerRefs[0] !== nodeId &&
+            ownerRefs[ownerRefs.length - 1] !== nodeId)
+          throw new Error("Узел не является концом дороги");
+        const ownerTags = tagsOf(owner);
+        if ((ownerTags.bridge && ownerTags.bridge !== "no") ||
+            (ownerTags.tunnel && ownerTags.tunnel !== "no") ||
+            ownerTags.covered === "yes" ||
+            Number(ownerTags.layer || 0) !== Number(tags.layer || 0))
+          throw new Error("Нельзя соединять дороги на разных уровнях");
+        if (Array.from(document.relations.values()).some((rel) =>
+            childElements(rel).some((member) =>
+              member.tagName === "member" && member.getAttribute("type") === "node" &&
+              member.getAttribute("ref") === nodeId)))
+          throw new Error("Этот узел входит в OSM-отношение; проверьте его вручную");
+        const refs = refsOf(target);
+        if (!Number.isInteger(targetIndex) || targetIndex < 1 ||
+            targetIndex >= refs.length)
+          throw new Error("Целевой сегмент больше не существует");
+        const a = coordinateOf(requireElement(document, "node", refs[targetIndex - 1]));
+        const b = coordinateOf(requireElement(document, "node", refs[targetIndex]));
+        const meters = (p: Coordinate) => {
+          const scale = 111319.49079327358;
+          return { x: p.lon * scale * Math.cos(coordinate.lat * Math.PI / 180),
+            y: p.lat * scale };
+        };
+        const p = meters(coordinate), u = meters(a), v = meters(b);
+        const dx = v.x - u.x, dy = v.y - u.y;
+        const length2 = dx * dx + dy * dy;
+        const t = ((p.x - u.x) * dx + (p.y - u.y) * dy) / (length2 || 1);
+        if (t <= 0 || t >= 1 || Math.sqrt(length2) * Math.min(t, 1 - t) < 0.75 ||
+            Math.hypot(p.x - (u.x + t * dx), p.y - (u.y + t * dy)) > 0.35)
+          throw new Error("Точка привязки не находится внутри сегмента");
+        const original = coordinateOf(node);
+        const old = meters(original);
+        if (Math.hypot(old.x - p.x, old.y - p.y) > 4)
+          throw new Error("Разрыв больше 4 м: проверьте дорогу вручную");
+        touch("node", nodeId);
+        touch("way", targetWayId);
+        node.setAttribute("lat", coordinate.lat.toFixed(9));
+        node.setAttribute("lon", coordinate.lon.toFixed(9));
+        const nds = childElements(target).filter((element) => element.tagName === "nd");
+        const nd = document.xml.createElement("nd");
+        nd.setAttribute("ref", nodeId);
+        target.insertBefore(nd, nds[targetIndex]);
+        patch.selection = { type: "node", id: nodeId };
         break;
       }
       case "remove-signal": {

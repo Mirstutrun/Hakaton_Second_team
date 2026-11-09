@@ -815,3 +815,98 @@ button svg {
   width: 22px;
   height: 22px;
 }
+
+
+/* RoadForge map QA / comparison workspace */
+.qa-dock {
+  position: absolute;
+  top: 72px;
+  left: 16px;
+  z-index: 4;
+  pointer-events: none;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  max-height: calc(100% - 145px);
+}
+.qa-actions, .qa-panel, .reference-panel { pointer-events: auto; }
+.qa-actions { display: flex; flex-direction: column; gap: 7px; }
+.qa-trigger {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  min-width: 155px; padding: 11px 13px;
+  background: #162a2dee; border: 1px solid #476560;
+  color: #def3e9; box-shadow: 0 10px 35px #0005;
+  backdrop-filter: blur(14px); font-weight: 600;
+}
+.qa-trigger[aria-expanded="true"] { background: #294d3e; border-color: #a3efbd; }
+.qa-trigger strong {
+  background: #e7bb78; border-radius: 30px; padding: 3px 7px; color: #2f2110;
+  font-size: 10px;
+}
+.qa-symbol { color: #a3efbd; }
+.qa-panel, .reference-panel {
+  width: min(350px, 40vw);
+  max-height: calc(100dvh - 220px);
+  overflow: auto;
+  background: #132326f5;
+  border: 1px solid #48665e;
+  border-radius: 11px;
+  box-shadow: 0 20px 65px #0009;
+  padding: 17px;
+  backdrop-filter: blur(18px);
+}
+.qa-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; }
+.qa-header small { color: #8fb9a8; font-size: 9px; letter-spacing: 1.4px; }
+.qa-header h3 { font-size: 18px; margin: 4px 0 6px; color: #e7f6ed; }
+.qa-header > button {
+  border: none; background: transparent; color: #a9bdb6;
+  font-size: 23px; padding: 0 5px; line-height: 1;
+}
+.qa-subtitle { color: #a3bcb5; font-size: 11px; margin: 8px 0 13px; line-height: 1.55; }
+.qa-metrics { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-bottom: 14px; }
+.qa-metrics span {
+  background: #1e3535; border: 1px solid #35514b; border-radius: 7px;
+  padding: 9px 6px; text-align: center; font-size: 9px; color: #a9c8be;
+}
+.qa-metrics strong { display: block; font-size: 20px; margin-bottom: 4px; color: #e6f9ed; }
+.qa-list { max-height: 42vh; overflow: auto; scrollbar-width: thin; }
+.qa-issue { border-top: 1px solid #304945; padding: 11px 2px; }
+.qa-issue p { margin: 0 0 8px; font-size: 11px; line-height: 1.6; color: #d6e7df; }
+.qa-issue-actions { display: flex; gap: 7px; }
+.qa-issue-actions button {
+  padding: 5px 10px; font-size: 10px; background: #253b39;
+}
+.qa-issue-actions .qa-repair { background: #a3efbd; color: #143227; font-weight: 700; }
+.qa-more { width: 100%; margin-top: 11px; }
+.qa-empty { font-size: 12px; color: #bdd8cc; }
+.reference-panel iframe {
+  width: 100%; height: min(36vh, 320px); display: block;
+  border: 1px solid #3a554c; border-radius: 7px; background: #dce6e3;
+}
+.reference-panel a { display: block; font-size: 12px; color: #b0f2cc; margin-top: 12px; }
+.qa-provider-note { display: block; margin-top: 9px; font-size: 10px; color: #94aaa4; }
+@media (max-width: 900px) {
+  .qa-dock { top: 54px; left: 8px; flex-direction: column; }
+  .qa-actions { flex-direction: row; }
+  .qa-trigger { min-width: auto; font-size: 10px; padding: 7px; }
+  .qa-panel, .reference-panel { width: min(320px, 83vw); max-height: 45vh; }
+}
+
+.advanced-tags { margin-top: 16px; }
+.advanced-tag-entry {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin: 12px 0 17px;
+}
+.advanced-tag-entry input { font-size: 10px; padding: 8px; }
+.advanced-tag-entry button { grid-column: 1 / -1; }
+.advanced-tag-row {
+  display: grid; grid-template-columns: minmax(50px, .9fr) minmax(60px, 1.1fr) 26px 26px;
+  align-items: center; gap: 5px; padding: 6px 2px;
+  border-bottom: 1px solid #2c4842; font-size: 10px;
+}
+.advanced-tag-row code {
+  color: #a3efbd; font: inherit; overflow-wrap: anywhere;
+}
+.advanced-tag-row span {
+  color: #b4cbc0; overflow-wrap: anywhere;
+}
+.advanced-tag-row button { padding: 5px 2px; font-size: 13px; }
