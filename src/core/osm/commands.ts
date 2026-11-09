@@ -349,6 +349,7 @@ export function applyEdit(
           const la = Math.hypot(ax, az), lb = Math.hypot(bx, bz);
           const dot = (ax * bx + az * bz) / (la * lb || 1);
           const protectedNode = (occurrences.get(id) ?? 0) > 1 ||
+            refs.indexOf(id) !== refs.lastIndexOf(id) ||
             relationRefs.has(id) || Object.keys(tagsOf(node)).length > 0;
           const trim = Math.min(radius, la * 0.32, lb * 0.32);
           if (protectedNode || dot > 0.96 || dot < -0.98 ||
@@ -356,6 +357,8 @@ export function applyEdit(
             result.push(id);
             continue;
           }
+          if (corners >= 80)
+            throw new Error("Слишком много изгибов в одном действии. Разделите дорогу на участки.");
           corners++;
           const p0 = { x: point.x - ax / la * trim,
             z: point.z - az / la * trim };
