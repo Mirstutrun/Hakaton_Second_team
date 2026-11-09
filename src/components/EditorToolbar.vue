@@ -2,15 +2,15 @@
 import { ref } from "vue";
 import AppIcon from "./AppIcon.vue";
 import { useEditorStore } from "../stores/editor";
-import { editorTools } from "../editor/tools";
+import { editorTools, type EditorTool } from "../editor/tools";
 
 const store = useEditorStore();
 const search = ref("");
-const groups = [
+const groups: { title: string; tools: EditorTool[] }[] = [
   { title: "Выбор и транспорт", tools: ["select", "lane", "car"] },
   { title: "Редактирование", tools: ["draw", "move", "insert", "signal"] },
 ];
-function choose(id: typeof store.tool) {
+function choose(id: EditorTool) {
   store.tool = id;
   store.draft = [];
   if (id === "lane" && store.selection?.type === "way")
@@ -43,7 +43,7 @@ function find() {
         :class="['tool', { active: store.tool === id }]"
         :disabled="!store.document"
         :title="editorTools.find((tool) => tool.id === id)?.hint"
-        @click="choose(id as typeof store.tool)">
+        @click="choose(id)">
         <span class="tool-icon"><AppIcon :name="id" /></span>
         <span>{{ editorTools.find((tool) => tool.id === id)?.name }}</span>
         <kbd>{{ editorTools.find((tool) => tool.id === id)?.key }}</kbd>
