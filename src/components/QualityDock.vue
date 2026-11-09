@@ -56,10 +56,14 @@ function repair(index: number) {
   const fix = issue.fix;
   // Warning-level findings need explicit user action; never rewrite road
   // geometry without showing what will be connected.
-  if (!window.confirm(`Соединить дороги ${fix.wayA} и ${fix.wayB} общим узлом? Проверьте, что это реальный перекрёсток, а не разноуровневая развязка.`))
-    return;
-  const patch = store.execute({ type: "connect-crossing", ...fix });
-  if (patch) store.message = "Перекрёсток соединён. Проверка пересчитана.";
+  const confirmation = fix.kind === "connect-crossing"
+    ? `Соединить дороги ${fix.wayA} и ${fix.wayB} общим узлом? Убедитесь, что это наземный перекрёсток.`
+    : `Переместить свободный конец ${fix.nodeId} к дороге ${fix.targetWayId} и вставить общий узел? Проверьте по снимку, что соединение существует.`;
+  if (!window.confirm(confirmation)) return;
+  const patch = fix.kind === "connect-crossing"
+    ? store.execute({ type: "connect-crossing", ...fix })
+    : store.execute({ type: "attach-endpoint", ...fix });
+  if (patch) store.message = "Связь добавлена. Проверка пересчитана.";
 }
 </script>
 
@@ -93,7 +97,7 @@ function repair(index: number) {
           <p>{{ issue.message }}</p>
           <div class="qa-issue-actions">
             <button v-if="issue.id" @click="locate(index)">Показать</button>
-            <button v-if="issue.fix" class="qa-repair" @click="repair(index)">Соединить узлом</button>
+            <button v-if="issue.fix" class="qa-repair" @click="repair(index)">{{ issue.fix.kind === "attach-endpoint" ? "Замкнуть разрыв" : "Соединить узлом" }}</button>
           </div>
         </article>
       </div>
