@@ -287,18 +287,41 @@ function removeVertex() {
           </div>
           <div class="field-row">
             <label>Ширина, м<input v-model="form.width" aria-label="Ширина дороги" placeholder="Напр. 7.2"/></label>
-            <label>Покрытие<input v-model="form.surface" aria-label="Покрытие" placeholder="Например, асфальт"/></label>
+            <label>Покрытие<select v-model="form.surface" aria-label="Покрытие">
+  <option value="">Не указано</option><option value="asphalt">Асфальт</option>
+  <option value="concrete">Бетон</option><option value="paving_stones">Плитка</option>
+  <option value="gravel">Щебень</option><option value="dirt">Грунт</option>
+  <option value="ground">Земля</option><option value="sand">Песок</option>
+</select></label>
           </div>
           <div class="field-row">
-            <label>Доступ<input v-model="form.access" aria-label="Доступ" placeholder="Открыта / закрыта"/></label>
-            <label>Тип перекрёстка<input v-model="form.junction" aria-label="Тип перекрёстка" placeholder="Например, круговое"/></label>
+            <label>Проезд транспорта<select v-model="form.access" aria-label="Доступ">
+  <option value="">Не указано</option><option value="yes">Разрешён</option>
+  <option value="private">Частный проезд</option><option value="no">Запрещён</option>
+  <option value="destination">Только к месту назначения</option>
+  <option value="delivery">Только доставка</option>
+</select></label>
+            <label>Тип перекрёстка<select v-model="form.junction" aria-label="Тип перекрёстка">
+  <option value="">Обычный</option><option value="roundabout">Круговое движение</option>
+  <option value="circular">Круговая развязка</option>
+</select></label>
           </div>
           <div class="field-row">
-            <label>Тоннель<input v-model="form.tunnel" aria-label="Тоннель" placeholder="Есть / нет"/></label>
-            <label>Тротуар<input v-model="form.sidewalk" aria-label="Тротуар" placeholder="С обеих сторон"/></label>
+            <label>Тоннель<select v-model="form.tunnel" aria-label="Тоннель">
+  <option value="">Не указан</option><option value="yes">Да</option>
+  <option value="no">Нет</option>
+</select></label>
+            <label>Тротуар<select v-model="form.sidewalk" aria-label="Тротуар">
+  <option value="">Не указано</option><option value="both">С обеих сторон</option>
+  <option value="left">Слева</option><option value="right">Справа</option>
+  <option value="no">Нет</option>
+</select></label>
           </div>
           <div class="field-row">
-            <label>Велодорожка<input v-model="form.cycleway" aria-label="Велодорожка" placeholder="Есть / нет"/></label>
+            <label>Велодорожка<select v-model="form.cycleway" aria-label="Велодорожка">
+  <option value="">Не указано</option><option value="lane">Полоса на дороге</option>
+  <option value="track">Отдельная дорожка</option><option value="no">Нет</option>
+</select></label>
             <label>Полосы поворотов<input v-model="form['turn:lanes']" aria-label="Повороты по полосам" placeholder="Налево / прямо / направо"/></label>
           </div>
           <p v-if="tags.width" class="field-hint">
@@ -339,12 +362,10 @@ function removeVertex() {
             </select></label
           >
           <div class="field-row">
-            <label
-              >Мост<input
-                v-model="form.bridge"
-                aria-label="Мост"
-                placeholder="yes / no" /></label
-            ><label
+            <label>Мост<select v-model="form.bridge" aria-label="Мост">
+  <option value="">Не указан</option><option value="yes">Да</option>
+  <option value="no">Нет</option>
+</select></label><label
               >Уровень<input
                 v-model="form.layer"
                 aria-label="Уровень"
