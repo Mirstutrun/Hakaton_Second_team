@@ -11,6 +11,7 @@ import {
   type Selection,
 } from "../core/osm/model";
 import { validateOsm } from "../core/osm/validation";
+import { auditGeometry } from "../core/osm/geometryAudit";
 import type { EditorTool } from "../editor/tools";
 
 export const useEditorStore = defineStore("editor", () => {
@@ -36,6 +37,10 @@ export const useEditorStore = defineStore("editor", () => {
   const dirty = computed(() => cursor.value !== savedCursor.value);
   const canUndo = computed(() => cursor.value > 0);
   const canRedo = computed(() => cursor.value < history.value.length);
+  const geometryIssues = computed(() => {
+    revision.value;
+    return document.value ? auditGeometry(document.value) : [];
+  });
   const issues = computed(() => {
     revision.value;
     return document.value ? validateOsm(document.value) : [];
@@ -187,6 +192,7 @@ export const useEditorStore = defineStore("editor", () => {
     canUndo,
     canRedo,
     issues,
+    geometryIssues,
     stats,
     load,
     execute,
