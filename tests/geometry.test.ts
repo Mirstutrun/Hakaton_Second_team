@@ -25,6 +25,7 @@ describe("geometry quality assurance", () => {
     const issues = auditGeometry(doc);
     expect(issues.some((issue) => issue.code === "unconnected-crossing")).toBe(true);
     expect(issues.some((issue) => issue.code === "road-building-overlap")).toBe(true);
+    expect(issues.some((issue) => issue.code === "isolated-component")).toBe(true);
   });
 
   it("joins an at-grade crossing transactionally and survives OSM roundtrip", () => {
@@ -39,6 +40,7 @@ describe("geometry quality assurance", () => {
     expect(b).toHaveLength(3);
     expect(a[1]).toBe(b[1]);
     expect(auditGeometry(doc).some((issue) => issue.code === "unconnected-crossing")).toBe(false);
+    expect(auditGeometry(doc).some((issue) => issue.code === "isolated-component")).toBe(false);
     expect(serializeOsm(parseOsm(serializeOsm(doc)))).toBe(serializeOsm(doc));
     applyPatch(doc, patch, "before");
     expect(serializeOsm(doc)).toBe(crossing);
