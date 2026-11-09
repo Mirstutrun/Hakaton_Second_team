@@ -17,6 +17,7 @@ const nodeRefs = computed(() =>
   store.selected && isRoad.value ? refsOf(store.selected) : [],
 );
 const visualLanes = computed(() => roadStyle(tags.value).lanes);
+const roadLabels: Record<string, string> = {"motorway":"Автомагистраль","trunk":"Скоростная дорога","primary":"Главная дорога","secondary":"Городская магистраль","tertiary":"Районная дорога","residential":"Жилая улица","unclassified":"Обычная дорога","service":"Проезд / парковка","living_street":"Жилая зона","footway":"Пешеходная дорожка","path":"Тропа","cycleway":"Велодорожка","steps":"Лестница","pedestrian":"Пешеходная улица"};
 const laneForm = reactive({ turn: "", change: "", maxspeed: "" });
 const laneInfo = computed(() => {
   if (!isRoad.value || store.selectedLane === null || !store.selected) return null;
@@ -160,7 +161,7 @@ function removeVertex() {
 <template>
   <aside class="properties-panel">
     <div class="inspector-heading">
-      <span class="section-label">ИНСПЕКТОР</span><span class="tag">OSM</span>
+      <span class="section-label">НАСТРОЙКИ ОБЪЕКТА</span><span class="tag">КАРТА</span>
     </div>
     <template v-if="store.selected">
       <h2>
@@ -173,7 +174,56 @@ function removeVertex() {
         }}
       </h2>
       <div class="object-id">
-        {{ store.selection?.type }} / {{ store.selection?.id }}
+        {{ store.selection?.type === "way" ? "Дорога" : "Узел" }} № {{ store.selection?.id }}
+      </div>
+      <div v-if="isRoad" class="lane-section">
+        <div class="section-label">ПОЛОСЫ ДВИЖЕНИЯ</div>
+        <p class="field-hint">Выберите полосу на карте или нажмите её номер. Повороты и ограничения сохраняются отдельно для каждой полосы.</p>
+        <button class="choose-lane-button" type="button"
+          @click="store.tool = 'lane'">
+          Выбрать полосу на карте <span>Л</span>
+        </button>
+        <div class="lane-picker">
+          <button v-for="i in visualLanes" :key="i" type="button"
+            :title="'Полоса ' + i"
+            :class="{ 'lane-active': store.selectedLane === i - 1 }"
+            @click="store.selectedLane = i - 1">
+            {{ i }}
+          </button>
+        </div>
+        <form v-if="laneInfo" class="lane-settings" @submit.prevent="applyLane">
+          <p class="field-hint">Полоса {{ store.selectedLane! + 1 }} · {{ laneInfo.direction }}</p>
+          <label>Разрешённые повороты
+            <select v-model="laneForm.turn" aria-label="Повороты выбранной полосы">
+              <option value="">Не указано</option>
+              <option value="left">Налево</option>
+              <option value="through">Прямо</option>
+              <option value="right">Направо</option>
+              <option value="left;through">Налево / прямо</option>
+              <option value="through;right">Прямо / направо</option>
+              <option value="reverse">Разворот</option>
+              <option value="none">Без поворотов</option>
+            </select>
+          </label>
+          <label>Перестроение
+            <select v-model="laneForm.change" aria-label="Перестроение с полосы">
+              <option value="">Не указано</option>
+              <option value="yes">Разрешено</option>
+              <option value="no">Запрещено</option>
+              <option value="not_left">Нельзя влево</option>
+              <option value="not_right">Нельзя вправо</option>
+              <option value="only_left">Только влево</option>
+              <option value="only_right">Только вправо</option>
+            </select>
+          </label>
+          <label>Ограничение скорости полосы (км/ч)
+            <input v-model="laneForm.maxspeed" aria-label="Скорость выбранной полосы"
+              placeholder="Например, 40" />
+          </label>
+          <button class="primary full-width">Применить к полосе</button>
+        </form>
+        <div class="divider"></div>
+
       </div>
       <form class="properties-form" @submit.prevent="apply">
         <template v-if="isRoad">
@@ -212,27 +262,11 @@ function removeVertex() {
               >
                 {{ form.highway }}
               </option>
-              <option
-                v-for="value in [
-                  'motorway',
-                  'trunk',
-                  'primary',
-                  'secondary',
-                  'tertiary',
-                  'residential',
-                  'unclassified',
-                  'service',
-                  'living_street',
-                  'footway',
-                  'path',
-                  'cycleway',
-                  'steps',
-                  'pedestrian',
-                ]"
-                :key="value"
-              >
-                {{ value }}
-              </option>
+              <option v-for="value in [
+                  'motorway','trunk','primary','secondary','tertiary','residential',
+                  'unclassified','service','living_street','footway','path',
+                  'cycleway','steps','pedestrian'
+                ]" :key="value" :value="value">{{ roadLabels[value] ?? value }}</option>
             </select></label
           >
           <div class="field-row">
@@ -248,24 +282,24 @@ function removeVertex() {
               >Скорость, км/ч<input
                 v-model="form.maxspeed"
                 aria-label="Скорость"
-                placeholder="Не указана"
+                placeholder="Например, 60"
             /></label>
           </div>
           <div class="field-row">
             <label>Ширина, м<input v-model="form.width" aria-label="Ширина дороги" placeholder="Напр. 7.2"/></label>
-            <label>Покрытие<input v-model="form.surface" aria-label="Покрытие" placeholder="asphalt / gravel"/></label>
+            <label>Покрытие<input v-model="form.surface" aria-label="Покрытие" placeholder="Например, асфальт"/></label>
           </div>
           <div class="field-row">
-            <label>Доступ<input v-model="form.access" aria-label="Доступ" placeholder="yes / private / no"/></label>
-            <label>Тип перекрёстка<input v-model="form.junction" aria-label="Тип перекрёстка" placeholder="roundabout"/></label>
+            <label>Доступ<input v-model="form.access" aria-label="Доступ" placeholder="Открыта / закрыта"/></label>
+            <label>Тип перекрёстка<input v-model="form.junction" aria-label="Тип перекрёстка" placeholder="Например, круговое"/></label>
           </div>
           <div class="field-row">
-            <label>Тоннель<input v-model="form.tunnel" aria-label="Тоннель" placeholder="yes / no"/></label>
-            <label>Тротуар<input v-model="form.sidewalk" aria-label="Тротуар" placeholder="both / left / right"/></label>
+            <label>Тоннель<input v-model="form.tunnel" aria-label="Тоннель" placeholder="Есть / нет"/></label>
+            <label>Тротуар<input v-model="form.sidewalk" aria-label="Тротуар" placeholder="С обеих сторон"/></label>
           </div>
           <div class="field-row">
-            <label>Велодорожка<input v-model="form.cycleway" aria-label="Велодорожка" placeholder="lane / track"/></label>
-            <label>Полосы поворотов<input v-model="form['turn:lanes']" aria-label="Повороты по полосам" placeholder="left|through|right"/></label>
+            <label>Велодорожка<input v-model="form.cycleway" aria-label="Велодорожка" placeholder="Есть / нет"/></label>
+            <label>Полосы поворотов<input v-model="form['turn:lanes']" aria-label="Повороты по полосам" placeholder="Налево / прямо / направо"/></label>
           </div>
           <p v-if="tags.width" class="field-hint">
             Ширина задана тегом width={{ tags.width }} м и имеет приоритет над
@@ -298,8 +332,8 @@ function removeVertex() {
             >Направление<select v-model="form.oneway" aria-label="Направление">
               <option value="">Не задано</option>
               <option value="no">Двустороннее</option>
-              <option value="yes">По ходу way →</option>
-              <option value="-1">Против хода way ←</option>
+              <option value="yes">По направлению дороги →</option>
+              <option value="-1">Против направления дороги ←</option>
               <option value="reversible">Реверсивное</option>
               <option value="alternating">Попеременное</option>
             </select></label
@@ -354,47 +388,6 @@ function removeVertex() {
       </form>
       <template v-if="isRoad">
         <div class="divider"></div>
-        <div class="section-label">ВЫБОР ПОЛОСЫ</div>
-        <p class="field-hint">Нажмите на полосу на карте или выберите ниже.</p>
-        <div class="lane-picker">
-          <button v-for="i in visualLanes" :key="i"
-            :class="{ 'lane-active': store.selectedLane === i - 1 }"
-            @click="store.selectedLane = i - 1">
-            {{ i }}
-          </button>
-        </div>
-        <form v-if="laneInfo" class="lane-settings" @submit.prevent="applyLane">
-          <p class="field-hint">Полоса {{ store.selectedLane! + 1 }} · {{ laneInfo.direction }}</p>
-          <label>Разрешённые повороты
-            <select v-model="laneForm.turn" aria-label="Повороты выбранной полосы">
-              <option value="">Не указано</option>
-              <option value="left">Налево</option>
-              <option value="through">Прямо</option>
-              <option value="right">Направо</option>
-              <option value="left;through">Налево / прямо</option>
-              <option value="through;right">Прямо / направо</option>
-              <option value="reverse">Разворот</option>
-              <option value="none">Без поворотов</option>
-            </select>
-          </label>
-          <label>Перестроение
-            <select v-model="laneForm.change" aria-label="Перестроение с полосы">
-              <option value="">Не указано</option>
-              <option value="yes">Разрешено</option>
-              <option value="no">Запрещено</option>
-              <option value="not_left">Нельзя влево</option>
-              <option value="not_right">Нельзя вправо</option>
-              <option value="only_left">Только влево</option>
-              <option value="only_right">Только вправо</option>
-            </select>
-          </label>
-          <label>Ограничение скорости полосы (км/ч)
-            <input v-model="laneForm.maxspeed" aria-label="Скорость выбранной полосы"
-              placeholder="Например, 40" />
-          </label>
-          <button class="primary full-width">Сохранить полосу</button>
-        </form>
-        <div class="divider"></div>
         <div class="section-label">
           ГЕОМЕТРИЯ · {{ nodeRefs.length }} ВЕРШИН
         </div>
@@ -432,7 +425,7 @@ function removeVertex() {
           <p>
             {{
               isRoad
-                ? "Удалить выбранный way? Общие узлы останутся."
+                ? "Удалить эту дорогу? Общие узлы останутся на карте."
                 : "Убрать светофор? Узел дороги останется."
             }}
           </p>
@@ -441,8 +434,8 @@ function removeVertex() {
         </div>
       </div>
       <details class="advanced-tags">
-        <summary>Расширенный редактор OSM-тегов · {{ Object.keys(tags).length }}</summary>
-        <p class="field-hint">Любые допустимые ключи OSM. Пустое значение удаляет тег. Оригинальные метаданные и отношения сохраняются.</p>
+        <summary>Дополнительные свойства дороги · {{ Object.keys(tags).length }}</summary>
+        <p class="field-hint">Для опытных пользователей. Можно изменять дополнительные свойства карты.</p>
         <div class="advanced-tag-entry">
           <input v-model="extraKey" aria-label="Ключ OSM-тега" placeholder="ключ (например, maxheight)" />
           <input v-model="extraValue" aria-label="Значение OSM-тега" placeholder="значение" />
@@ -484,9 +477,7 @@ function removeVertex() {
           {{ issue.message }}
         </p>
       </details>
-      <p class="field-hint">
-        Серверная проверка MATSim / SUMO / Webots выполняется отдельно.
-      </p>
+
     </div>
   </aside>
 </template>
