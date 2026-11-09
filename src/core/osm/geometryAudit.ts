@@ -299,6 +299,56 @@ export function auditGeometry(document: OsmDocument): ValidationIssue[] {
       });
     }
   }
+  // Undirected connectivity check: disconnected motor-road subgraphs are
+  // candidates for review (not necessarily errors in a clipped OSM extract).
+  const parent = new Map<string, string>();
+  const find = (id: string): string => {
+    if (!parent.has(id)) parent.set(id, id);
+    let current = id;
+    while (parent.get(current)! !== current) current = parent.get(current)!;
+    const root = current;
+    current = id;
+    while (parent.get(current)! !== current) {
+      const next = parent.get(current)!;
+      parent.set(current, root);
+      current = next;
+    }
+    return root;
+  };
+  for (const refs of roadWays.values()) {
+    if (!refs.length) continue;
+    const anchor = find(refs[0]);
+    for (const ref of refs.slice(1)) {
+      const other = find(ref);
+      if (anchor !== other) parent.set(other, anchor);
+    }
+  }
+  const components = new Map<string, { ways: Set<string>; nodes: Set<string> }>();
+  for (const [wayId, refs] of roadWays) {
+    if (!refs.length) continue;
+    const root = find(refs[0]);
+    const component = components.get(root) ?? {
+      ways: new Set<string>(), nodes: new Set<string>(),
+    };
+    component.ways.add(wayId);
+    for (const ref of refs) component.nodes.add(ref);
+    components.set(root, component);
+  }
+  const sorted = Array.from(components.values())
+    .sort((a, b) => b.nodes.size - a.nodes.size);
+  if (sorted.length > 1) {
+    for (const component of sorted.slice(1, 41)) {
+      const wayId = component.ways.values().next().value!;
+      const nodeId = component.nodes.values().next().value!;
+      const node = document.nodes.get(nodeId);
+      push({
+        severity: "warning", code: "isolated-component",
+        id: wayId, elementType: "way",
+        coordinate: node ? coordinateOf(node) : undefined,
+        message: `Изолированная часть сети: ${component.ways.size} дорог / ${component.nodes.size} узлов. Проверьте соединения и границы OSM-фрагмента`,
+      });
+    }
+  }
   if (issues.length === LIMIT) {
     issues.push({ severity: "warning", code: "limit",
       message: `Показаны первые ${LIMIT} геометрических предупреждений. Уточните карту и запустите проверку снова.` });
