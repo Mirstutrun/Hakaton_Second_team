@@ -451,11 +451,8 @@ function removeVertex() {
     </template>
     <div v-else class="empty-inspector">
       <div class="empty-icon">⌖</div>
-      <h2>Всё начинается<br />с одной дороги</h2>
-      <p>
-        Выберите объект на карте,<br />чтобы изменить его свойства<br />и
-        геометрию.
-      </p>
+      <h2>Объект не выбран</h2>
+      <p>Выберите дорогу, узел или светофор.</p>
       <span class="key-hint"><kbd>V</kbd> Выбор объекта</span>
     </div>
     <div class="validation">
