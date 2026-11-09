@@ -7,6 +7,25 @@ import { useEditorStore } from "../stores/editor";
 const store = useEditorStore();
 const form = reactive<Record<string, string>>({});
 const confirmDelete = ref(false);
+const extraKey = ref("");
+const extraValue = ref("");
+function putCustomTag() {
+  if (!store.selection) return;
+  const key = extraKey.value.trim();
+  if (!key || !/^[a-zA-Z0-9_:.-]+$/.test(key)) {
+    store.error = "Введите допустимый ключ OSM-тега без пробелов";
+    return;
+  }
+  if (store.execute({ type: "set-tags", target: store.selection,
+    tags: { [key]: extraValue.value || null } })) {
+    extraKey.value = "";
+    extraValue.value = "";
+  }
+}
+function deleteCustomTag(key: string) {
+  if (!store.selection) return;
+  store.execute({ type: "set-tags", target: store.selection, tags: { [key]: null } });
+}
 const tags = computed(() => {
   store.revision;
   return store.selected ? tagsOf(store.selected) : {};
@@ -20,6 +39,14 @@ const visualLanes = computed(() => roadStyle(tags.value).lanes);
 const fields = [
   "name",
   "highway",
+  "width",
+  "surface",
+  "access",
+  "junction",
+  "tunnel",
+  "sidewalk",
+  "cycleway",
+  "turn:lanes",
   "lanes",
   "lanes:forward",
   "lanes:backward",
@@ -164,6 +191,22 @@ function removeVertex() {
                 placeholder="Не указана"
             /></label>
           </div>
+          <div class="field-row">
+            <label>Ширина, м<input v-model="form.width" aria-label="Ширина дороги" placeholder="Напр. 7.2"/></label>
+            <label>Покрытие<input v-model="form.surface" aria-label="Покрытие" placeholder="asphalt / gravel"/></label>
+          </div>
+          <div class="field-row">
+            <label>Доступ<input v-model="form.access" aria-label="Доступ" placeholder="yes / private / no"/></label>
+            <label>Тип перекрёстка<input v-model="form.junction" aria-label="Тип перекрёстка" placeholder="roundabout"/></label>
+          </div>
+          <div class="field-row">
+            <label>Тоннель<input v-model="form.tunnel" aria-label="Тоннель" placeholder="yes / no"/></label>
+            <label>Тротуар<input v-model="form.sidewalk" aria-label="Тротуар" placeholder="both / left / right"/></label>
+          </div>
+          <div class="field-row">
+            <label>Велодорожка<input v-model="form.cycleway" aria-label="Велодорожка" placeholder="lane / track"/></label>
+            <label>Полосы поворотов<input v-model="form['turn:lanes']" aria-label="Повороты по полосам" placeholder="left|through|right"/></label>
+          </div>
           <p v-if="tags.width" class="field-hint">
             Ширина задана тегом width={{ tags.width }} м и имеет приоритет над
             числом полос.
@@ -293,14 +336,22 @@ function removeVertex() {
           ><button @click="confirmDelete = false">Отмена</button>
         </div>
       </div>
-      <details>
-        <summary>Все теги · {{ Object.keys(tags).length }}</summary>
-        <dl>
-          <template v-for="(value, key) in tags" :key="key"
-            ><dt>{{ key }}</dt>
-            <dd>{{ value }}</dd></template
-          >
-        </dl>
+      <details class="advanced-tags">
+        <summary>Расширенный редактор OSM-тегов · {{ Object.keys(tags).length }}</summary>
+        <p class="field-hint">Любые допустимые ключи OSM. Пустое значение удаляет тег. Оригинальные метаданные и отношения сохраняются.</p>
+        <div class="advanced-tag-entry">
+          <input v-model="extraKey" aria-label="Ключ OSM-тега" placeholder="ключ (например, maxheight)" />
+          <input v-model="extraValue" aria-label="Значение OSM-тега" placeholder="значение" />
+          <button type="button" @click="putCustomTag">Сохранить</button>
+        </div>
+        <div v-for="(value, key) in tags" :key="key" class="advanced-tag-row">
+          <code>{{ key }}</code>
+          <span>{{ value }}</span>
+          <button type="button" :aria-label="'Изменить тег ' + key"
+            @click="extraKey = String(key); extraValue = String(value)">✎</button>
+          <button type="button" :aria-label="'Удалить тег ' + key"
+            @click="deleteCustomTag(String(key))">×</button>
+        </div>
       </details>
     </template>
     <div v-else class="empty-inspector">
