@@ -26,10 +26,7 @@ function find() {
 <template>
   <aside class="tools-panel">
     <div class="section-label">РАБОЧЕЕ ПРОСТРАНСТВО</div>
-    <h2>Редактор сети</h2>
-    <p class="muted intro">
-      От городской геометрии<br />к точной дорожной сети.
-    </p>
+    <h2>Инструменты</h2>
     <div class="section-label tools-label">ИНСТРУМЕНТЫ</div>
     <button
       v-for="tool in editorTools"
@@ -80,8 +77,6 @@ function find() {
         {{ store.stats.signals }} светофора
       </div>
     </div>
-    <div class="local-badge">
-      <span class="live-dot"></span> Локально. Без облака.
-    </div>
+
   </aside>
 </template>
