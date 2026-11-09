@@ -164,7 +164,6 @@ export class TrafficModel {
     const { a, b, width, lanes, elevation, oneway } = car.edge;
     const dx = b.x - a.x, dz = b.z - a.z;
     const length = Math.hypot(dx, dz) || 1;
-    const laneCount = oneway ? lanes : Math.max(1, Math.floor(lanes / 2));
     const laneWidth = width / Math.max(1, lanes);
     // Russia: traffic keeps to the right, even for reverse-way edges.
     const offset = -width / 2 + (car.lane + 0.5) * laneWidth;
