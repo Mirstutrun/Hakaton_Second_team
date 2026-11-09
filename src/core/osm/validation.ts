@@ -22,6 +22,12 @@ export interface ValidationIssue {
     wayB: string;
     indexB: number;
     coordinate: Coordinate;
+  } | {
+    kind: "attach-endpoint";
+    nodeId: string;
+    targetWayId: string;
+    targetIndex: number;
+    coordinate: Coordinate;
   };
 }
 
