@@ -58,12 +58,48 @@ export function validateOsm(document: OsmDocument): ValidationIssue[] {
         id,
         message: `Дорога ${id}: отсутствует узел`,
       });
-    if (tagsOf(way).highway && new Set(refs).size < 2)
+    const tags = tagsOf(way);
+    if (tags.highway && new Set(refs).size < 2)
       issues.push({
         severity: "warning",
         id,
         message: `Дорога ${id}: меньше двух разных узлов`,
       });
+    if (tags.highway) {
+      for (const key of ["lanes", "lanes:forward", "lanes:backward"]) {
+        const value = tags[key];
+        if (value && (!/^\\d+$/.test(value) || Number(value) < 1 || Number(value) > 20))
+          issues.push({ severity: "warning", id, elementType: "way",
+            code: "invalid-lanes",
+            message: `Дорога ${id}: некорректное значение ${key}=${value}` });
+      }
+      const total = Number(tags.lanes || 0);
+      const forward = Number(tags["lanes:forward"] || 0);
+      const backward = Number(tags["lanes:backward"] || 0);
+      if (total > 0 && forward + backward > total)
+        issues.push({ severity: "warning", id, elementType: "way",
+          code: "lane-conflict",
+          message: `Дорога ${id}: сумма полос по направлениям превышает общее число` });
+      if (tags.oneway === "yes" && backward > 0)
+        issues.push({ severity: "warning", id, elementType: "way",
+          code: "oneway-conflict",
+          message: `Дорога ${id}: одностороннее движение конфликтует с lanes:backward` });
+      if (tags.oneway === "-1" && forward > 0)
+        issues.push({ severity: "warning", id, elementType: "way",
+          code: "oneway-conflict",
+          message: `Дорога ${id}: обратное направление конфликтует с lanes:forward` });
+      if (tags.oneway &&
+          !["yes", "no", "-1", "reversible", "alternating"].includes(tags.oneway))
+        issues.push({ severity: "warning", id, elementType: "way",
+          code: "invalid-oneway", message: `Дорога ${id}: необычное oneway=${tags.oneway}` });
+      if (tags.bridge && tags.bridge !== "no" &&
+          tags.tunnel && tags.tunnel !== "no")
+        issues.push({ severity: "warning", id, elementType: "way",
+          code: "elevation-conflict", message: `Дорога ${id}: одновременно мост и тоннель` });
+      if (tags.width && (!Number.isFinite(Number(tags.width)) || Number(tags.width) <= 0))
+        issues.push({ severity: "warning", id, elementType: "way",
+          code: "invalid-width", message: `Дорога ${id}: подозрительная ширина ${tags.width}` });
+    }
   }
   let externalMembers = 0;
   for (const relation of document.relations.values()) {
