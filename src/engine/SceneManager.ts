@@ -23,7 +23,7 @@ import {
   type RoadPoint,
 } from "../core/osm/model";
 import {
-  buildRoad, laneCenterline, roadStyle, selectedLaneMesh, smoothRoadPoints,
+  buildRoad, roadStyle, selectedLaneMesh, smoothRoadPoints,
 } from "./geometry/roads";
 import { TrafficModel } from "./TrafficModel";
 import { buildBuilding } from "./geometry/buildings";
