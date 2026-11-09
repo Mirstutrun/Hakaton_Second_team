@@ -44,6 +44,7 @@ export class SceneManager {
   private laneHighlight: Mesh | null = null;
   private traffic: TrafficModel | null = null;
   private vehicleMeshes = new Map<string, Mesh>();
+  private vehicleHeadings = new Map<string, number>();
   private vehicleMaterials: StandardMaterial[] = [];
   private drag: {
     id: string;
@@ -290,6 +291,12 @@ export class SceneManager {
         { width: 1.8, height: 1.25, depth: 4.1 }, this.scene);
       mesh.material = this.vehicleMaterials[vehicle.color % this.vehicleMaterials.length];
       mesh.metadata = { role: "vehicle", id };
+      const cabin = MeshBuilder.CreateBox(`vehicle-cabin:${id}`,
+        { width: 1.45, height: 0.35, depth: 2.05 }, this.scene);
+      cabin.parent = mesh;
+      cabin.position.set(0, 0.73, -0.2);
+      cabin.material = this.materials.pole;
+      cabin.isPickable = false;
       this.vehicleMeshes.set(id, mesh);
     }
     this.store.vehicleCount = this.traffic.size;
@@ -301,6 +308,7 @@ export class SceneManager {
     this.traffic?.remove(id);
     this.vehicleMeshes.get(id)?.dispose();
     this.vehicleMeshes.delete(id);
+    this.vehicleHeadings.delete(id);
     this.store.selectedVehicle = null;
     this.store.vehicleCount = this.traffic?.size ?? 0;
   }
@@ -308,6 +316,7 @@ export class SceneManager {
   clearVehicles() {
     for (const mesh of this.vehicleMeshes.values()) mesh.dispose();
     this.vehicleMeshes.clear();
+    this.vehicleHeadings.clear();
     this.traffic?.clear();
     this.store.selectedVehicle = null;
     this.store.vehicleCount = 0;
@@ -322,7 +331,12 @@ export class SceneManager {
       if (!car) continue;
       const position = this.traffic.pose(car);
       mesh.position.set(position.x, position.y, position.z);
-      mesh.rotation.y = position.heading;
+      const previous = this.vehicleHeadings.get(id) ?? position.heading;
+      const difference = Math.atan2(Math.sin(position.heading - previous),
+        Math.cos(position.heading - previous));
+      const heading = previous + difference * Math.min(1, this.engine.getDeltaTime() / 170);
+      this.vehicleHeadings.set(id, heading);
+      mesh.rotation.y = heading;
       mesh.material = this.store.selectedVehicle === id
         ? this.materials.selectedVehicle
         : this.vehicleMaterials[car.color % this.vehicleMaterials.length];
