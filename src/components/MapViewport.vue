@@ -2,6 +2,7 @@
 import { onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { SceneManager } from "../engine/SceneManager";
 import QualityDock from "./QualityDock.vue";
+import TrafficDock from "./TrafficDock.vue";
 import { useEditorStore } from "../stores/editor";
 
 const canvas = ref<HTMLCanvasElement>();
@@ -37,6 +38,22 @@ watch(
 watch(
   () => [store.buildings, store.markings, store.pedestrians],
   () => manager?.visibility(),
+);
+watch(
+  () => store.vehicleAddRequest,
+  () => manager?.addVehicles(1),
+);
+watch(
+  () => store.vehicleAddBatchRequest,
+  () => manager?.addVehicles(10),
+);
+watch(
+  () => store.vehicleDeleteRequest,
+  () => manager?.deleteSelectedVehicle(),
+);
+watch(
+  () => store.vehicleClearRequest,
+  () => manager?.clearVehicles(),
 );
 watch(
   () => store.focusRequest,
@@ -87,6 +104,7 @@ onBeforeUnmount(() => manager?.dispose());
       </button>
     </div>
     <QualityDock />
+    <TrafficDock />
     <div v-if="store.loading" class="loading">
       <div class="spinner"></div>
       Подготовка дорожной сети…
