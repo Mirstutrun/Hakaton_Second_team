@@ -42,6 +42,7 @@ export class SceneManager {
   private handles: Mesh[] = [];
   private issueMeshes: Mesh[] = [];
   private preview: Mesh | null = null;
+  private routePreview: Mesh | null = null;
   private laneHighlight: Mesh | null = null;
   private traffic: TrafficModel | null = null;
   private vehicleMeshes = new Map<string, Mesh>();
@@ -110,6 +111,7 @@ export class SceneManager {
       issueCrossing: "#ffb968",
       issueBuilding: "#ff6e84",
       issueGap: "#aee1ff",
+      busStop: "#ffbf48",
     })) {
       const material = new StandardMaterial(name, this.scene);
       material.diffuseColor = Color3.FromHexString(color);
@@ -180,6 +182,7 @@ export class SceneManager {
     this.signalMeshes.clear();
     this.clearVehicles();
     this.traffic = new TrafficModel(document);
+    this.refreshRoute();
     this.rebuildJunctionCounts();
     for (const id of document.ways.keys()) this.refreshWay(id);
     for (const id of document.nodes.keys()) this.refreshSignal(id);
@@ -209,7 +212,7 @@ export class SceneManager {
       const node = this.document?.nodes.get(id);
       const tags = node ? tagsOf(node) : {};
       if ((this.junctionCounts.get(id) ?? 0) > 1 ||
-          tags.highway === "traffic_signals" || tags.barrier || tags.railway)
+          tags.highway === "traffic_signals" || tags.public_transport === "stop_position" || tags.barrier || tags.railway)
         indices.add(index);
     }
     return indices;
@@ -258,21 +261,30 @@ export class SceneManager {
     this.signalMeshes.delete(id);
     const node = this.document?.nodes.get(id);
     const point = this.point(id);
-    if (!node || !point || tagsOf(node).highway !== "traffic_signals") return;
+    if (!node || !point) return;
+    const nodeTags = tagsOf(node);
+    const signal = nodeTags.highway === "traffic_signals";
+    const busStop = nodeTags.public_transport === "stop_position" && nodeTags.bus === "yes";
+    if (!signal && !busStop) return;
     const way = Array.from(this.document!.ways.values()).find(
       (way) => tagsOf(way).highway && refsOf(way).includes(id),
     );
     point.y = way ? roadStyle(tagsOf(way)).elevation : 0;
-    this.signalMeshes.set(
-      id,
-      buildSignal(
-        id,
-        point,
-        this.scene,
-        this.materials.pole,
-        this.materials.lamp,
-      ),
-    );
+    if (signal) this.signalMeshes.set(id, buildSignal(id, point, this.scene,
+      this.materials.pole, this.materials.lamp));
+    else {
+      const marker = MeshBuilder.CreateBox(`bus-stop:${id}`,
+        { width: 2.7, height: 0.25, depth: 5 }, this.scene);
+      marker.position = point.add(new Vector3(0, 0.25, 0));
+      marker.material = this.materials.busStop;
+      marker.metadata = { type: "node", id, role: "stop" };
+      const sign = MeshBuilder.CreateCylinder(`bus-stop-sign:${id}`,
+        { diameter: 1.4, height: 3.2, tessellation: 4 }, this.scene);
+      sign.position = point.add(new Vector3(3, 1.6, 0));
+      sign.material = this.materials.busStop;
+      sign.metadata = { type: "node", id, role: "stop" };
+      this.signalMeshes.set(id, [marker, sign]);
+    }
   }
 
   refreshChangedMeshes(patch: EditPatch | null) {
@@ -308,6 +320,22 @@ export class SceneManager {
   private resetTrafficAfterEdit() {
     this.clearVehicles();
     if (this.document) this.traffic = new TrafficModel(this.document);
+    this.refreshRoute();
+  }
+
+  refreshRoute() {
+    this.routePreview?.dispose();
+    this.routePreview = null;
+    const edges = this.traffic?.routeEdges(this.store.selectedBusRoute) ?? [];
+    if (!edges.length) return;
+    const lines = edges.map((edge) => [
+      new Vector3(edge.a.x, edge.elevation + 1.1, edge.a.z),
+      new Vector3(edge.b.x, edge.elevation + 1.1, edge.b.z),
+    ]);
+    const mesh = MeshBuilder.CreateLineSystem("bus-route-preview", { lines }, this.scene);
+    mesh.color = Color3.FromHexString("#ffae32");
+    mesh.isPickable = false;
+    this.routePreview = mesh;
   }
 
   addVehicleAt(wayId: string, position: Vector3) {
@@ -333,19 +361,45 @@ export class SceneManager {
     this.store.vehicleCount = this.traffic.size;
   }
 
+  addBus() {
+    if (!this.traffic || !this.store.selectedBusRoute) return;
+    const id = this.traffic.addBus(this.store.selectedBusRoute);
+    if (!id) {
+      this.store.error = "Для маршрута нет доступного пути";
+      return;
+    }
+    this.spawnCarMesh(id);
+    this.store.vehicleCount = this.traffic.size;
+    this.store.busCount = this.traffic.busCount;
+  }
+
   private spawnCarMesh(id: string) {
     const vehicle = this.traffic?.cars.get(id);
     if (!vehicle) return;
+    const bus = vehicle.kind === "bus";
     const mesh = MeshBuilder.CreateBox(`vehicle:${id}`,
-      { width: 1.8, height: 1.25, depth: 4.1 }, this.scene);
-    mesh.material = this.vehicleMaterials[vehicle.color % this.vehicleMaterials.length];
+      bus ? { width: 2.4, height: 2.5, depth: 9 } :
+        { width: 1.8, height: 1.25, depth: 4.1 }, this.scene);
+    mesh.material = bus ? this.materials.busStop :
+      this.vehicleMaterials[vehicle.color % this.vehicleMaterials.length];
     mesh.metadata = { role: "vehicle", id };
-    const cabin = MeshBuilder.CreateBox(`vehicle-cabin:${id}`,
-      { width: 1.45, height: 0.35, depth: 2.05 }, this.scene);
-    cabin.parent = mesh;
-    cabin.position.set(0, 0.73, -0.2);
-    cabin.material = this.materials.pole;
-    cabin.isPickable = false;
+    if (bus) {
+      for (const side of [-1, 1]) {
+        const windows = MeshBuilder.CreateBox(`bus-windows:${id}:${side}`,
+          { width: 0.06, height: 0.65, depth: 6.8 }, this.scene);
+        windows.parent = mesh;
+        windows.position.set(side * 1.23, 0.38, 0);
+        windows.material = this.materials.pole;
+        windows.isPickable = false;
+      }
+    } else {
+      const cabin = MeshBuilder.CreateBox(`vehicle-cabin:${id}`,
+        { width: 1.45, height: 0.35, depth: 2.05 }, this.scene);
+      cabin.parent = mesh;
+      cabin.position.set(0, 0.73, -0.2);
+      cabin.material = this.materials.pole;
+      cabin.isPickable = false;
+    }
     this.vehicleMeshes.set(id, mesh);
     const position = this.traffic!.pose(vehicle);
     mesh.position.set(position.x, position.y, position.z);
@@ -370,6 +424,7 @@ export class SceneManager {
     this.vehicleHeadings.delete(id);
     this.store.selectedVehicle = null;
     this.store.vehicleCount = this.traffic?.size ?? 0;
+    this.store.busCount = this.traffic?.busCount ?? 0;
   }
 
   clearVehicles() {
@@ -379,6 +434,7 @@ export class SceneManager {
     this.traffic?.clear();
     this.store.selectedVehicle = null;
     this.store.vehicleCount = 0;
+    this.store.busCount = 0;
   }
 
   private tickTraffic() {
@@ -398,7 +454,8 @@ export class SceneManager {
       mesh.rotation.y = heading;
       mesh.material = this.store.selectedVehicle === id
         ? this.materials.selectedVehicle
-        : this.vehicleMaterials[car.color % this.vehicleMaterials.length];
+        : car.kind === "bus" ? this.materials.busStop
+          : this.vehicleMaterials[car.color % this.vehicleMaterials.length];
     }
   }
 
@@ -584,23 +641,38 @@ export class SceneManager {
 
   private snap(point: Vector3): RoadPoint {
     if (!this.document) return this.projection.unproject(point);
-    let nearest: string | null = null;
+    let nearest: RoadPoint = this.projection.unproject(point);
     let distance = 8;
-    for (const way of this.document.ways.values()) {
+    for (const [wayId, way] of this.document.ways) {
       const tags = tagsOf(way);
       if (!tags.highway || Math.abs(roadStyle(tags).elevation - 0.18) > 1)
         continue;
-      for (const id of refsOf(way)) {
+      const refs = refsOf(way);
+      for (const id of refs) {
         const position = this.point(id);
         if (!position) continue;
         const candidate = Vector3.Distance(point, position);
         if (candidate < distance) {
           distance = candidate;
-          nearest = id;
+          nearest = { nodeId: id };
+        }
+      }
+      for (let index = 1; index < refs.length; index++) {
+        const a = this.point(refs[index - 1]), b = this.point(refs[index]);
+        if (!a || !b) continue;
+        const delta = b.subtract(a);
+        const t = Math.max(0, Math.min(1,
+          Vector3.Dot(point.subtract(a), delta) / (delta.lengthSquared() || 1)));
+        const projected = a.add(delta.scale(t));
+        const candidate = Vector3.Distance(point, projected);
+        if (candidate < distance && projected.subtract(a).length() >= 1 &&
+            projected.subtract(b).length() >= 1) {
+          distance = candidate;
+          nearest = { wayId, index, coordinate: this.projection.unproject(projected) };
         }
       }
     }
-    return nearest ? { nodeId: nearest } : this.projection.unproject(point);
+    return nearest;
   }
 
   private nearestSegment(wayId: string, point: Vector3) {
@@ -642,6 +714,8 @@ export class SceneManager {
     const points = this.store.draft.map((point) =>
       "nodeId" in point
         ? this.point(point.nodeId)!
+        : "wayId" in point
+          ? (() => { const p = this.projection.project(point.coordinate); return new Vector3(p.x, 0, p.z); })()
         : (() => {
             const p = this.projection.project(point);
             return new Vector3(p.x, 0, p.z);
@@ -695,7 +769,7 @@ export class SceneManager {
         this.scene.pointerX,
         this.scene.pointerY,
         (mesh) =>
-          mesh.metadata?.role === "handle" || mesh.metadata?.role === "signal",
+          mesh.metadata?.role === "handle" || mesh.metadata?.role === "signal" || mesh.metadata?.role === "stop",
       );
       if (pick?.pickedMesh && this.store.tool === "move") {
         const mesh = pick.pickedMesh as Mesh;
@@ -747,13 +821,16 @@ export class SceneManager {
       Math.hypot(event.clientX - this.down.x, event.clientY - this.down.y) > 5
     )
       return;
-    const roadOnly = this.store.tool === "lane" || this.store.tool === "car";
+    const roadOnly = ["lane", "car", "bus-stop"].includes(this.store.tool);
+    const routeOnly = this.store.tool === "bus-route";
+    const joinOnly = this.store.tool === "join";
     const pick = this.scene.pick(
       this.scene.pointerX,
       this.scene.pointerY,
-      (mesh) => roadOnly
+      (mesh) => routeOnly ? mesh.metadata?.role === "stop" : joinOnly
+        ? ["road", "handle"].includes(mesh.metadata?.role) : roadOnly
         ? mesh.metadata?.role === "road"
-        : ["road", "handle", "signal", "issue", "vehicle"].includes(mesh.metadata?.role),
+        : ["road", "handle", "signal", "stop", "issue", "vehicle"].includes(mesh.metadata?.role),
     );
     const metadata = pick?.pickedMesh?.metadata;
     if (this.store.tool === "car") {
@@ -770,13 +847,66 @@ export class SceneManager {
       } else this.store.error = "Нажмите на одну из полос дороги";
       return;
     }
+    if (this.store.tool === "bus-route") {
+      if (metadata?.role === "stop") this.store.addRouteStop(metadata.id);
+      else this.store.error = "Нажмите на маркер остановки";
+      return;
+    }
+    if (this.store.tool === "join") {
+      if (!this.store.joinSource) {
+        const wayId = metadata?.role === "road" ? metadata.id :
+          metadata?.role === "handle" && this.store.selection?.type === "way"
+            ? this.store.selection.id : null;
+        const way = wayId ? this.document.ways.get(wayId) : null;
+        const refs = way ? refsOf(way) : [];
+        const position = pick?.pickedPoint;
+        if (!way || refs.length < 2 || !position) {
+          this.store.error = "Сначала выберите свободный конец дороги";
+          return;
+        }
+        const candidates = [refs[0], refs[refs.length - 1]];
+        const nearest = candidates.map((id) => ({ id,
+          distance: this.point(id) ? Vector3.Distance(position, this.point(id)!) : Infinity }))
+          .sort((a, b) => a.distance - b.distance)[0];
+        if (nearest.distance > 14) {
+          this.store.error = "Нажмите ближе к концу дороги";
+          return;
+        }
+        this.store.joinSource = { wayId, nodeId: nearest.id };
+        this.store.selectOsmElement({ type: "way", id: wayId });
+        this.store.selectedVertex = nearest.id;
+        this.store.error = "";
+        this.refreshSelection();
+      } else {
+        if (metadata?.role !== "road" || metadata.id === this.store.joinSource.wayId ||
+            !pick?.pickedPoint) {
+          this.store.error = "Нажмите на другую дорогу";
+          return;
+        }
+        const nearest = this.nearestSegment(metadata.id, pick.pickedPoint);
+        if (Math.sqrt(nearest.distance) > 15) {
+          this.store.error = "Нажмите ближе к целевой дороге";
+          return;
+        }
+        const target: RoadPoint = nearest.nodeId ? { nodeId: nearest.nodeId } :
+          { wayId: metadata.id, index: nearest.index,
+            coordinate: this.projection.unproject(nearest.point) };
+        if (this.store.execute({ type: "merge-endpoint",
+          wayId: this.store.joinSource.wayId,
+          nodeId: this.store.joinSource.nodeId, target })) {
+          this.store.joinSource = null;
+          this.store.tool = "select";
+        }
+      }
+      return;
+    }
     if (this.store.tool === "draw") {
       const point = this.groundPoint();
       if (point) {
         this.store.draft.push(this.snap(point));
         this.refreshPreview();
       }
-    } else if (["insert", "signal"].includes(this.store.tool)) {
+    } else if (["insert", "signal", "bus-stop"].includes(this.store.tool)) {
       const wayId =
         metadata?.type === "way"
           ? metadata.id
@@ -794,7 +924,8 @@ export class SceneManager {
         return;
       }
       this.store.execute({
-        type: this.store.tool === "signal" ? "add-signal" : "insert-node",
+        type: this.store.tool === "signal" ? "add-signal" :
+          this.store.tool === "bus-stop" ? "add-bus-stop" : "insert-node",
         wayId,
         index: nearest.index,
         point: nearest.nodeId

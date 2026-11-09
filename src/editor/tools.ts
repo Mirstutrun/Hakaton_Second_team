@@ -1,4 +1,4 @@
-export type EditorTool = "select" | "draw" | "move" | "insert" | "signal";
+export type EditorTool = "select" | "lane" | "car" | "draw" | "join" | "move" | "insert" | "signal" | "bus-stop" | "bus-route";
 
 export const editorTools: {
   id: EditorTool;
@@ -31,6 +31,12 @@ export const editorTools: {
     hint: "Ставьте точки. Рядом с узлом сработает привязка. Enter — завершить, Esc — отменить.",
   },
   {
+    id: "join",
+    name: "Соединить дороги",
+    key: "J",
+    hint: "Выберите свободный конец дороги, затем нажмите на другую дорогу или её узел.",
+  },
+  {
     id: "move",
     name: "Геометрия",
     key: "M",
@@ -47,5 +53,17 @@ export const editorTools: {
     name: "Светофор",
     key: "T",
     hint: "Нажмите на дорогу, чтобы установить светофор на ближайший сегмент.",
+  },
+  {
+    id: "bus-stop",
+    name: "Остановка",
+    key: "B",
+    hint: "Нажмите на дорогу, чтобы установить автобусную остановку. Она сохранится в OSM.",
+  },
+  {
+    id: "bus-route",
+    name: "Маршрут автобуса",
+    key: "R",
+    hint: "Выберите остановки на карте по порядку. Затем задайте название и сохраните маршрут.",
   },
 ];

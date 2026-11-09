@@ -13,6 +13,7 @@ const tags = computed(() => {
 });
 const isRoad = computed(() => store.selection?.type === "way");
 const isSignal = computed(() => tags.value.highway === "traffic_signals");
+const isStop = computed(() => tags.value.public_transport === "stop_position" && tags.value.bus === "yes");
 const nodeRefs = computed(() =>
   store.selected && isRoad.value ? refsOf(store.selected) : [],
 );
@@ -134,7 +135,7 @@ function remove() {
   const patch = store.execute(
     isRoad.value
       ? { type: "delete-way", id: store.selection.id }
-      : { type: "remove-signal", id: store.selection.id },
+      : { type: isStop.value ? "remove-bus-stop" : "remove-signal", id: store.selection.id },
   );
   if (patch) store.selectOsmElement(null);
   confirmDelete.value = false;
@@ -170,6 +171,8 @@ function removeVertex() {
             ? tags.name || "Дорога без названия"
             : isSignal
               ? "Светофор"
+              : isStop
+                ? tags.name || "Автобусная остановка"
               : "Узел сети"
         }}
       </h2>
@@ -379,6 +382,9 @@ function removeVertex() {
           </p>
         </template>
         <template v-else>
+          <label v-if="isStop">Название остановки
+            <input v-model="form.name" aria-label="Название остановки" placeholder="Например, Центральная" />
+          </label>
           <label v-if="isSignal"
             >Направление светофора<select
               v-model="form['traffic_signals:direction']"
@@ -400,7 +406,7 @@ function removeVertex() {
           </p>
         </template>
         <button
-          v-if="isRoad || isSignal"
+          v-if="isRoad || isSignal || isStop"
           class="primary full-width"
           type="submit"
         >
@@ -434,19 +440,21 @@ function removeVertex() {
           Удалить вершину из дороги
         </button>
       </template>
-      <div v-if="isRoad || isSignal" class="delete-section">
+      <div v-if="isRoad || isSignal || isStop" class="delete-section">
         <button
           v-if="!confirmDelete"
           class="danger full-width"
           @click="confirmDelete = true"
         >
-          {{ isRoad ? "Удалить дорогу" : "Удалить светофор" }}
+          {{ isRoad ? "Удалить дорогу" : isStop ? "Убрать остановку" : "Удалить светофор" }}
         </button>
         <div v-else class="confirm-delete">
           <p>
             {{
               isRoad
                 ? "Удалить эту дорогу? Общие узлы останутся на карте."
+                : isStop
+                  ? "Убрать остановку? Узел дороги останется."
                 : "Убрать светофор? Узел дороги останется."
             }}
           </p>

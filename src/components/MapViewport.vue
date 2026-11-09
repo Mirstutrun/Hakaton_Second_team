@@ -55,6 +55,8 @@ watch(
   () => store.vehicleClearRequest,
   () => manager?.clearVehicles(),
 );
+watch(() => store.busAddRequest, () => manager?.addBus());
+watch(() => store.selectedBusRoute, () => manager?.refreshRoute());
 watch(
   () => store.focusRequest,
   () => manager?.focus(),
@@ -126,6 +128,18 @@ onBeforeUnmount(() => manager?.dispose());
       >
         Отмена
       </button>
+    </div>
+    <div v-if="store.tool === 'bus-route'" class="draw-card route-card">
+      <span>Маршрут <b>{{ store.routeDraft.length }} остановки</b></span>
+      <input v-model="store.routeName" aria-label="Название маршрута" placeholder="Например, автобус 1" />
+      <button class="primary" :disabled="store.routeDraft.length < 2 || !store.routeName.trim()"
+        @click="store.finishBusRoute()">Сохранить маршрут</button>
+      <button :disabled="!store.routeDraft.length" @click="store.routeDraft.pop()">Убрать последнюю</button>
+      <button @click="store.routeDraft = []; store.tool = 'select'">Отмена</button>
+    </div>
+    <div v-if="store.tool === 'join'" class="draw-card join-card">
+      <span>{{ store.joinSource ? `Конец дороги ${store.joinSource.wayId} выбран. Нажмите на другую дорогу.` : 'Выберите свободный конец дороги' }}</span>
+      <button @click="store.joinSource = null; store.tool = 'select'">Отмена</button>
     </div>
   </main>
 </template>

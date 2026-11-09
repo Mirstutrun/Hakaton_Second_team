@@ -97,6 +97,8 @@ function keyboard(event: KeyboardEvent) {
     store.selectedVehicle = null;
     store.selectedLane = null;
     store.draft = [];
+    store.routeDraft = [];
+    store.joinSource = null;
     store.tool = "select";
   }
   if (event.key === "Enter" && store.tool === "draw") store.finishRoad();

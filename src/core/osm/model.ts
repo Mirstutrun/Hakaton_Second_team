@@ -2,7 +2,11 @@ export type ElementType = "node" | "way" | "relation";
 export type Tags = Record<string, string>;
 export type Selection = { type: "node" | "way"; id: string };
 export type Coordinate = { lat: number; lon: number };
-export type RoadPoint = Coordinate | { nodeId: string };
+export type RoadPoint = Coordinate | { nodeId: string } | {
+  wayId: string;
+  index: number;
+  coordinate: Coordinate;
+};
 
 export interface OsmDocument {
   xml: XMLDocument;

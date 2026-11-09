@@ -8,11 +8,12 @@ const store = useEditorStore();
 const search = ref("");
 const groups: { title: string; tools: EditorTool[] }[] = [
   { title: "Выбор и транспорт", tools: ["select", "lane", "car"] },
-  { title: "Редактирование", tools: ["draw", "move", "insert", "signal"] },
+  { title: "Редактирование", tools: ["draw", "join", "move", "insert", "signal", "bus-stop", "bus-route"] },
 ];
 function choose(id: EditorTool) {
   store.tool = id;
   store.draft = [];
+  store.joinSource = null;
   if (id === "lane" && store.selection?.type === "way")
     store.selectedLane = store.selectedLane ?? 0;
 }
@@ -75,7 +76,7 @@ function find() {
       <span class="section-label">НА КАРТЕ</span>
       <strong>{{ store.stats.roads.toLocaleString("ru") }} <small>дорог</small></strong>
       <div>{{ store.stats.nodes.toLocaleString("ru") }} узлов ·
-        {{ store.stats.signals }} светофоров</div>
+        {{ store.stats.signals }} светофоров · {{ store.stats.stops }} остановок</div>
     </div>
   </aside>
 </template>

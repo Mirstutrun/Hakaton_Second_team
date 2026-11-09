@@ -33,7 +33,9 @@ describe("geometry quality assurance", () => {
     const suggestion = auditGeometry(doc).find((issue) =>
       issue.code === "unconnected-crossing" && issue.fix);
     expect(suggestion?.fix).toBeDefined();
-    const patch = applyEdit(doc, { type: "connect-crossing", ...suggestion!.fix! });
+    const fix = suggestion!.fix!;
+    if (fix.kind !== "connect-crossing") throw new Error("Ожидалось пересечение");
+    const patch = applyEdit(doc, { type: "connect-crossing", ...fix });
     const a = refsOf(doc.ways.get("10")!);
     const b = refsOf(doc.ways.get("11")!);
     expect(a).toHaveLength(3);

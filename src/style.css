@@ -1145,6 +1145,20 @@ kbd {
 .traffic-more-actions button { padding: 8px 5px; font-size: 10px; line-height: 1.3; }
 .traffic-speed { display: flex; flex-direction: column; gap: 6px; color: #758ea5; margin-top: 12px; }
 .traffic-speed input { width: 100%; height: 22px; }
+.bus-panel { border-top: 1px solid #dce7f0; margin-top: 11px; padding-top: 10px; font-size: 11px; }
+.bus-panel summary { cursor: pointer; font-weight: 750; color: #315d91; }
+.bus-panel p { color: #728aa0; line-height: 1.4; }
+.bus-panel label { display: grid; gap: 5px; margin-top: 9px; color: #54708a; }
+.bus-panel select, .route-card input { min-width: 0; width: 100%; padding: 7px; border: 1px solid #cdddea; border-radius: 8px; background: white; color: #294760; }
+.bus-panel > button { margin-top: 6px; width: 100%; }
+.bus-stop-list { max-height: 100px; overflow: auto; display: grid; gap: 4px; margin-top: 8px; }
+.bus-stop-list button { text-align: left; padding: 6px; }
+.bus-actions { display: flex; gap: 5px; margin-top: 7px; }
+.bus-actions button { flex: 1; }
+.bus-actions .traffic-add { background: #4478eb; color: white; }
+.traffic-dock:has(.bus-panel[open]) { max-height: min(70vh, 600px); overflow: auto; }
+.route-card { display: flex; flex-wrap: wrap; gap: 5px; max-width: min(450px, 90%); top: 60px; bottom: auto; z-index: 6; }
+.route-card input { flex: 1 1 100%; }
 .qa-trigger {
   color: #3f5d79; background: #fffffff4; border-color: #dbe6ef;
   box-shadow: 0 7px 25px #375e8018;

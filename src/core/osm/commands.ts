@@ -21,11 +21,16 @@ import type {
 export type EditCommand =
   | { type: "set-tags"; target: Selection; tags: Record<string, string | null> }
   | { type: "create-road"; points: RoadPoint[]; tags: Tags }
+  | { type: "merge-endpoint"; wayId: string; nodeId: string; target: RoadPoint }
   | { type: "move-node"; id: string; coordinate: Coordinate }
   | { type: "insert-node"; wayId: string; index: number; point: RoadPoint }
   | { type: "remove-vertex"; wayId: string; index: number }
   | { type: "delete-way"; id: string }
   | { type: "add-signal"; wayId: string; index: number; point: RoadPoint }
+  | { type: "add-bus-stop"; wayId: string; index: number; point: RoadPoint }
+  | { type: "remove-bus-stop"; id: string }
+  | { type: "create-bus-route"; name: string; stops: string[]; ways?: string[] }
+  | { type: "delete-bus-route"; id: string }
   | { type: "remove-signal"; id: string }
   | { type: "smooth-road"; wayId: string; radius?: number }
   | {
@@ -138,7 +143,7 @@ export function applyEdit(
       }
     }
   };
-  const newElement = (type: "node" | "way") => {
+  const newElement = (type: "node" | "way" | "relation") => {
     const id = (document.nextId++).toString();
     touch(type, id);
     const element = document.xml.createElement(type);
@@ -152,6 +157,35 @@ export function applyEdit(
     if ("nodeId" in point) {
       requireElement(document, "node", point.nodeId);
       return point.nodeId;
+    }
+    if ("wayId" in point) {
+      const way = requireElement(document, "way", point.wayId);
+      const tags = tagsOf(way);
+      if (!tags.highway || (tags.bridge && tags.bridge !== "no") ||
+          (tags.tunnel && tags.tunnel !== "no") || tags.covered === "yes" ||
+          Number(tags.layer || 0) !== 0)
+        throw new Error("Привязка возможна только к наземной дороге");
+      const refs = refsOf(way);
+      checkCoordinate(point.coordinate);
+      const projection = createProjection(point.coordinate);
+      const p = projection.project(point.coordinate);
+      let index = -1, best = Infinity;
+      let start = { x: 0, z: 0 }, end = { x: 0, z: 0 };
+      for (let j = 1; j < refs.length; j++) {
+        const a = projection.project(coordinateOf(requireElement(document, "node", refs[j - 1])));
+        const b = projection.project(coordinateOf(requireElement(document, "node", refs[j])));
+        const dx = b.x - a.x, dz = b.z - a.z;
+        const t = ((p.x - a.x) * dx + (p.z - a.z) * dz) / (dx * dx + dz * dz || 1);
+        const distance = Math.hypot(p.x - a.x - t * dx, p.z - a.z - t * dz);
+        if (t >= 0 && t <= 1 && distance < best) {
+          index = j; best = distance; start = a; end = b;
+        }
+      }
+      if (index < 0 || best > 0.5)
+        throw new Error("Точка привязки вышла за пределы сегмента");
+      if (Math.hypot(p.x - start.x, p.z - start.z) < 1) return refs[index - 1];
+      if (Math.hypot(p.x - end.x, p.z - end.z) < 1) return refs[index];
+      return insert(point.wayId, index, point.coordinate);
     }
     checkCoordinate(point);
     const node = newElement("node");
@@ -215,15 +249,208 @@ export function applyEdit(
           ids.some((id, index) => index > 0 && id === ids[index - 1])
         )
           throw new Error("Дорога должна содержать разные точки");
+        // Connect every at-grade crossing to the OSM graph, including crossings
+        // between clicks. Keep the original ways and their relation references.
+        const projection = createProjection(positions[0]);
+        const xy = positions.map((coordinate) => projection.project(coordinate));
+        const onNew = new Map<number, { t: number; id: string }[]>();
+        const onOld = new Map<string, Map<number, { t: number; id: string }[]>>();
+        const made: { x: number; z: number; id: string }[] = [];
+        const atGround = (tags: Tags) => tags.highway &&
+          !["footway", "path", "steps", "pedestrian", "cycleway", "construction", "proposed"].includes(tags.highway) &&
+          (!tags.bridge || tags.bridge === "no") &&
+          (!tags.tunnel || tags.tunnel === "no") && tags.covered !== "yes" &&
+          Number(tags.layer || 0) === Number(command.tags.layer || 0);
+        if (atGround({ highway: "residential", ...command.tags })) {
+          for (const [wayId, other] of document.ways) {
+            if (!atGround(tagsOf(other))) continue;
+            const refs = refsOf(other);
+            for (let j = 1; j < refs.length; j++) {
+              const a = projection.project(coordinateOf(requireElement(document, "node", refs[j - 1])));
+              const b = projection.project(coordinateOf(requireElement(document, "node", refs[j])));
+              const bx = b.x - a.x, bz = b.z - a.z;
+              for (let i = 1; i < xy.length; i++) {
+                const p = xy[i - 1], q = xy[i];
+                if (Math.max(p.x, q.x) < Math.min(a.x, b.x) ||
+                    Math.min(p.x, q.x) > Math.max(a.x, b.x) ||
+                    Math.max(p.z, q.z) < Math.min(a.z, b.z) ||
+                    Math.min(p.z, q.z) > Math.max(a.z, b.z)) continue;
+                const dx = q.x - p.x, dz = q.z - p.z;
+                const cross = dx * bz - dz * bx;
+                if (Math.abs(cross) < 0.0001) continue;
+                const rx = a.x - p.x, rz = a.z - p.z;
+                const t = (rx * bz - rz * bx) / cross;
+                const u = (rx * dz - rz * dx) / cross;
+                if (t < 0 || t > 1 || u < 0 || u > 1) continue;
+                const x = p.x + t * dx, z = p.z + t * dz;
+                const newStart = Math.hypot(x - p.x, z - p.z) < 0.75;
+                const newEnd = Math.hypot(x - q.x, z - q.z) < 0.75;
+                const oldStart = Math.hypot(x - a.x, z - a.z) < 0.75;
+                const oldEnd = Math.hypot(x - b.x, z - b.z) < 0.75;
+                const known = made.find((candidate) => Math.hypot(candidate.x - x, candidate.z - z) < 0.75);
+                const id = oldStart ? refs[j - 1] : oldEnd ? refs[j] :
+                  newStart ? ids[i - 1] : newEnd ? ids[i] : known?.id ?? (() => {
+                    const node = newElement("node");
+                    const coordinate = projection.unproject({ x, z });
+                    node.setAttribute("lat", coordinate.lat.toFixed(9));
+                    node.setAttribute("lon", coordinate.lon.toFixed(9));
+                    return node.getAttribute("id")!;
+                  })();
+                made.push({ x, z, id });
+                if (!newStart && !newEnd && id !== ids[i - 1] && id !== ids[i]) {
+                  const list = onNew.get(i) ?? [];
+                  if (!list.some((entry) => entry.id === id)) list.push({ t, id });
+                  onNew.set(i, list);
+                }
+                if (!oldStart && !oldEnd && id !== refs[j - 1] && id !== refs[j]) {
+                  const segments = onOld.get(wayId) ?? new Map<number, { t: number; id: string }[]>();
+                  const list = segments.get(j) ?? [];
+                  if (!list.some((entry) => entry.id === id)) list.push({ t: u, id });
+                  segments.set(j, list);
+                  onOld.set(wayId, segments);
+                }
+              }
+            }
+          }
+        }
+        for (const [wayId, segments] of onOld) {
+          const other = requireElement(document, "way", wayId);
+          touch("way", wayId);
+          const refs = refsOf(other);
+          const nextRefs = [refs[0]];
+          for (let j = 1; j < refs.length; j++) {
+            nextRefs.push(...(segments.get(j) ?? []).sort((a, b) => a.t - b.t).map((entry) => entry.id), refs[j]);
+          }
+          for (const nd of childElements(other).filter((child) => child.tagName === "nd")) nd.remove();
+          const beforeTags = childElements(other).find((child) => child.tagName === "tag") ?? null;
+          for (const ref of nextRefs) {
+            const nd = document.xml.createElement("nd");
+            nd.setAttribute("ref", ref);
+            other.insertBefore(nd, beforeTags);
+          }
+        }
         const way = newElement("way");
         const id = way.getAttribute("id")!;
-        for (const ref of ids) {
+        const connected = [ids[0]];
+        for (let i = 1; i < ids.length; i++)
+          connected.push(...(onNew.get(i) ?? []).sort((a, b) => a.t - b.t).map((entry) => entry.id), ids[i]);
+        for (const ref of connected.filter((ref, index) => index === 0 || ref !== connected[index - 1])) {
           const nd = document.xml.createElement("nd");
           nd.setAttribute("ref", ref);
           way.appendChild(nd);
         }
         setTags("way", id, { highway: "residential", ...command.tags });
         patch.selection = { type: "way", id };
+        break;
+      }
+      case "merge-endpoint": {
+        const source = requireElement(document, "way", command.wayId);
+        const sourceTags = tagsOf(source);
+        const refs = refsOf(source);
+        if (!sourceTags.highway ||
+            (refs[0] !== command.nodeId && refs[refs.length - 1] !== command.nodeId))
+          throw new Error("Выберите свободный конец дороги");
+        const node = requireElement(document, "node", command.nodeId);
+        const owners = Array.from(document.ways.values()).filter((way) =>
+          tagsOf(way).highway && refsOf(way).includes(command.nodeId));
+        if (owners.length !== 1 || owners[0] !== source)
+          throw new Error("Конец уже соединён с другой дорогой");
+        if (Object.keys(tagsOf(node)).length || Array.from(document.relations.values()).some((relation) =>
+          childElements(relation).some((member) => member.tagName === "member" &&
+            member.getAttribute("type") === "node" && member.getAttribute("ref") === command.nodeId)))
+          throw new Error("Конечный узел имеет теги или входит в OSM-отношение");
+        const sourceGround = (!sourceTags.bridge || sourceTags.bridge === "no") &&
+          (!sourceTags.tunnel || sourceTags.tunnel === "no") &&
+          sourceTags.covered !== "yes" && Number(sourceTags.layer || 0) === 0;
+        if (!sourceGround) throw new Error("Соединять можно наземные дороги одного уровня");
+        const targetNodeId = "nodeId" in command.target ? command.target.nodeId : null;
+        const targetWayId = "wayId" in command.target ? command.target.wayId :
+          targetNodeId ? Array.from(document.ways, ([id, way]) =>
+            tagsOf(way).highway && refsOf(way).includes(targetNodeId) ? id : "").find(Boolean) : "";
+        if (!targetWayId || targetWayId === command.wayId)
+          throw new Error("Выберите другую дорогу");
+        const targetWay = requireElement(document, "way", targetWayId);
+        const targetTags = tagsOf(targetWay);
+        if (!targetTags.highway ||
+            (targetTags.bridge && targetTags.bridge !== "no") ||
+            (targetTags.tunnel && targetTags.tunnel !== "no") ||
+            targetTags.covered === "yes" || Number(targetTags.layer || 0) !== 0)
+          throw new Error("Целевая дорога должна быть наземной и на том же уровне");
+        const targetId = pointId(command.target);
+        if (targetId === command.nodeId || refs.includes(targetId))
+          throw new Error("Дорога уже использует этот узел");
+        touch("way", command.wayId);
+        const nds = childElements(source).filter((child) => child.tagName === "nd");
+        (refs[0] === command.nodeId ? nds[0] : nds[nds.length - 1]).setAttribute("ref", targetId);
+        if (!Array.from(document.ways.values()).some((way) => refsOf(way).includes(command.nodeId))) {
+          touch("node", command.nodeId);
+          node.remove();
+          document.nodes.delete(command.nodeId);
+        }
+        patch.selection = { type: "way", id: command.wayId };
+        break;
+      }
+      case "add-bus-stop": {
+        const way = requireElement(document, "way", command.wayId);
+        if (!tagsOf(way).highway) throw new Error("Остановка должна находиться на дороге");
+        const id = "nodeId" in command.point && refsOf(way).includes(command.point.nodeId)
+          ? command.point.nodeId : insert(command.wayId, command.index, command.point);
+        const node = requireElement(document, "node", id);
+        if (tagsOf(node).highway === "traffic_signals")
+          throw new Error("Выберите место без светофора");
+        setTags("node", id, { public_transport: "stop_position", bus: "yes" });
+        patch.selection = { type: "node", id };
+        break;
+      }
+      case "remove-bus-stop": {
+        const node = requireElement(document, "node", command.id);
+        if (tagsOf(node).public_transport !== "stop_position" || tagsOf(node).bus !== "yes")
+          throw new Error("Выбранный узел не является автобусной остановкой");
+        if (Array.from(document.relations.values()).some((relation) =>
+          tagsOf(relation).route === "bus" && childElements(relation).some((member) =>
+            member.tagName === "member" && member.getAttribute("type") === "node" &&
+            member.getAttribute("ref") === command.id)))
+          throw new Error("Остановка входит в автобусный маршрут. Сначала удалите маршрут.");
+        setTags("node", command.id, { public_transport: null, bus: null, name: null });
+        break;
+      }
+      case "create-bus-route": {
+        const name = command.name.trim();
+        if (!name || command.stops.length < 2 || new Set(command.stops).size !== command.stops.length)
+          throw new Error("Укажите название и минимум две разные остановки");
+        for (const id of command.stops) {
+          const tags = tagsOf(requireElement(document, "node", id));
+          if (tags.public_transport !== "stop_position" || tags.bus !== "yes")
+            throw new Error(`Узел ${id} не является автобусной остановкой`);
+        }
+        for (const id of command.ways ?? []) {
+          if (!tagsOf(requireElement(document, "way", id)).highway)
+            throw new Error(`Участок ${id} не является дорогой`);
+        }
+        const relation = newElement("relation");
+        for (const id of command.ways ?? []) {
+          const member = document.xml.createElement("member");
+          member.setAttribute("type", "way");
+          member.setAttribute("ref", id);
+          member.setAttribute("role", "");
+          relation.appendChild(member);
+        }
+        for (const id of command.stops) {
+          const member = document.xml.createElement("member");
+          member.setAttribute("type", "node");
+          member.setAttribute("ref", id);
+          member.setAttribute("role", "stop");
+          relation.appendChild(member);
+        }
+        setTags("relation", relation.getAttribute("id")!, { type: "route", route: "bus", name });
+        break;
+      }
+      case "delete-bus-route": {
+        const relation = requireElement(document, "relation", command.id);
+        if (tagsOf(relation).route !== "bus") throw new Error("Это не автобусный маршрут");
+        touch("relation", command.id);
+        relation.remove();
+        document.relations.delete(command.id);
         break;
       }
       case "move-node": {

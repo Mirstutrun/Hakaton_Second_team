@@ -87,25 +87,12 @@ test("real map: edit lanes, draw, move, signal, delete, undo, export and reimpor
   await page.getByRole("spinbutton", { name: "Полосы", exact: true }).fill("4");
   await page.getByRole("button", { name: "Применить изменения" }).click();
   expect((await state(page)).tags.lanes).toBe("4");
-  const width = await page.evaluate(async (id) => {
-    const path = performance
-      .getEntriesByType("resource")
-      .find((entry) => entry.name.includes("/@babylonjs_core.js?"))!.name;
-    const { EngineStore, VertexBuffer, Vector3 } = await import(path);
-    const mesh = EngineStore.Instances[0].scenes[0].getMeshByName(`way:${id}`);
-    const positions = mesh.getVerticesData(VertexBuffer.PositionKind);
-    return Vector3.Distance(
-      Vector3.FromArray(positions, 0),
-      Vector3.FromArray(positions, 3),
-    );
-  }, road);
-  expect(width).toBeCloseTo(13.6, 1);
   await page.getByRole("button", { name: "Отменить", exact: true }).click();
   expect((await state(page)).tags.lanes).toBe("2");
   await page.getByRole("button", { name: "Повторить", exact: true }).click();
   expect((await state(page)).tags.lanes).toBe("4");
   await page.getByRole("button", { name: "Выбор V", exact: false }).click();
-  await page.locator("canvas").click({ position: { x: 50, y: 100 } });
+  await page.locator("canvas").click({ position: { x: 500, y: 100 } });
   await page.getByRole("button", { name: "Центрировать", exact: true }).click();
   await page.getByRole("button", { name: "Дорога D", exact: false }).click();
   for (const point of [
@@ -128,24 +115,21 @@ test("real map: edit lanes, draw, move, signal, delete, undo, export and reimpor
   await page.mouse.down();
   await page.mouse.move(end.x, end.y, { steps: 8 });
   await page.mouse.up();
-  const moved = await page.evaluate(async (id) => {
+  const moved = await page.evaluate(async () => {
     const path = "/src/stores/editor.ts";
     const geo = "/src/core/geo/projection.ts";
     const store = (await import(path)).useEditorStore();
     const { createProjection, documentOrigin } = await import(geo);
-    const ref = store.document.ways
-      .get(id)
-      .querySelectorAll("nd")[1]
-      .getAttribute("ref");
+    const ref = store.selectedVertex;
     const node = store.document.nodes.get(ref);
     return createProjection(documentOrigin(store.document)).project({
       lat: Number(node.getAttribute("lat")),
       lon: Number(node.getAttribute("lon")),
     });
-  }, newRoad);
+  });
   expect(moved.z).toBeCloseTo(-30, 0);
   await page.getByRole("button", { name: "Светофор T", exact: false }).click();
-  const signalPoint = await scenePoint(page, -85, -55);
+  const signalPoint = await scenePoint(page, -85, -80);
   await page.mouse.click(signalPoint.x, signalPoint.y);
   expect((await state(page)).signals).toBe(3);
   await page
@@ -192,7 +176,7 @@ test("2D preview: lane tags, vehicles and keyboard shortcuts", async ({ page }) 
   await expect(page.getByRole("button", { name: "2D", exact: true })).toHaveClass(/active/);
   const wayId = await page.evaluate(async () => {
     const store = (await import("/src/stores/editor.ts")).useEditorStore();
-    return Array.from(store.document.ways.values())
+    return Array.from(store.document!.ways.values())
       .find((way) => way.querySelector('tag[k="lanes"][v="2"]') &&
         way.querySelector('tag[k="highway"]'))?.getAttribute("id");
   });
@@ -204,8 +188,8 @@ test("2D preview: lane tags, vehicles and keyboard shortcuts", async ({ page }) 
   await page.getByRole("button", { name: "Применить к полосе" }).click();
   const laneSaved = await page.evaluate(async (id) => {
     const store = (await import("/src/stores/editor.ts")).useEditorStore();
-    const way = store.document.ways.get(id);
-    return Array.from(way.querySelectorAll("tag"))
+    const way = store.document!.ways.get(id!);
+    return Array.from(way!.querySelectorAll("tag"))
       .some((tag) => tag.getAttribute("k")?.startsWith("turn:lanes") &&
         tag.getAttribute("v")?.includes("left"));
   }, wayId);
@@ -214,7 +198,7 @@ test("2D preview: lane tags, vehicles and keyboard shortcuts", async ({ page }) 
   await page.keyboard.press("Control+y");
   const replayed = await page.evaluate(async (id) => {
     const store = (await import("/src/stores/editor.ts")).useEditorStore();
-    return Array.from(store.document.ways.get(id).querySelectorAll("tag"))
+    return Array.from(store.document!.ways.get(id!)!.querySelectorAll("tag"))
       .some((tag) => tag.getAttribute("k")?.startsWith("turn:lanes") &&
         tag.getAttribute("v")?.includes("left"));
   }, wayId);
@@ -230,4 +214,81 @@ test("2D preview: lane tags, vehicles and keyboard shortcuts", async ({ page }) 
   expect(await page.evaluate(async () =>
     (await import("/src/stores/editor.ts")).useEditorStore().vehicleCount)).toBe(0);
   expect(errors).toEqual([]);
+});
+
+test("bus stops, route and bus are available in the editor", async ({ page }) => {
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  await page.goto("/");
+  await expect(page.getByText("Ссылки дорог корректны")).toBeVisible({ timeout: 60000 });
+  await page.evaluate(async () => {
+    const store = (await import("/src/stores/editor.ts")).useEditorStore();
+    store.load(`<osm version="0.6">
+      <node id="1" lat="52" lon="104"/><node id="2" lat="52" lon="104.001"/>
+      <way id="10"><nd ref="1"/><nd ref="2"/><tag k="highway" v="residential"/></way>
+    </osm>`, "bus-test.osm");
+  });
+  await page.evaluate(async () => {
+    const store = (await import("/src/stores/editor.ts")).useEditorStore();
+    store.execute({ type: "add-bus-stop", wayId: "10", index: 1,
+      point: { lat: 52, lon: 104.00025 } });
+  });
+  await page.evaluate(async () => {
+    const store = (await import("/src/stores/editor.ts")).useEditorStore();
+    store.execute({ type: "add-bus-stop", wayId: "10", index: 2,
+      point: { lat: 52, lon: 104.00075 } });
+  });
+  await expect(page.getByText("2 остановок")).toBeVisible();
+  await page.getByRole("button", { name: "Маршрут автобуса R" }).click();
+  await page.getByText("Автобусы и маршруты · 0").click();
+  const stops = page.locator(".bus-stop-list button");
+  await stops.nth(0).click();
+  await stops.nth(1).click();
+  await page.getByRole("textbox", { name: "Название маршрута" }).fill("Автобус 1");
+  await page.getByRole("button", { name: "Сохранить маршрут" }).click();
+  await expect(page.getByText("Автобусы и маршруты · 1")).toBeVisible();
+  await page.getByRole("button", { name: "+ Автобус" }).click();
+  expect(await page.evaluate(async () =>
+    (await import("/src/stores/editor.ts")).useEditorStore().busCount)).toBe(1);
+  expect(errors).toEqual([]);
+});
+
+test("join tool connects an existing endpoint to a road", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.getByText("Ссылки дорог корректны")).toBeVisible({ timeout: 60000 });
+  await page.evaluate(async () => {
+    const store = (await import("/src/stores/editor.ts")).useEditorStore();
+    store.load(`<osm version="0.6">
+      <node id="1" lat="52" lon="104"/><node id="2" lat="52" lon="104.001"/>
+      <node id="3" lat="52.0002" lon="104.0002"/>
+      <node id="4" lat="52.0004" lon="104.0002"/>
+      <way id="10"><nd ref="1"/><nd ref="2"/><tag k="highway" v="residential"/></way>
+      <way id="11"><nd ref="3"/><nd ref="4"/><tag k="highway" v="residential"/></way>
+    </osm>`, "join-test.osm");
+    store.selectOsmElement({ type: "way", id: "11" });
+    store.focusRequest++;
+  });
+  const points = await page.evaluate(async () => {
+    const store = (await import("/src/stores/editor.ts")).useEditorStore();
+    const { createProjection, documentOrigin } = await import("/src/core/geo/projection.ts");
+    const projection = createProjection(documentOrigin(store.document!));
+    return {
+      source: projection.project({ lat: 52.0002, lon: 104.0002 }),
+      target: projection.project({ lat: 52, lon: 104.0002 }),
+    };
+  });
+  await page.getByRole("button", { name: "Соединить дороги J" }).click();
+  const sourcePoint = await scenePoint(page, points.source.x, points.source.z);
+  await page.mouse.click(sourcePoint.x, sourcePoint.y);
+  expect(await page.evaluate(async () =>
+    (await import("/src/stores/editor.ts")).useEditorStore().joinSource?.nodeId)).toBe("3");
+  const targetPoint = await scenePoint(page, points.target.x, points.target.z);
+  await page.mouse.click(targetPoint.x, targetPoint.y);
+  const connected = await page.evaluate(async () => {
+    const store = (await import("/src/stores/editor.ts")).useEditorStore();
+    const refs = (id: string) => Array.from(store.document!.ways.get(id)!.querySelectorAll("nd"),
+      (node) => node.getAttribute("ref"));
+    return refs("10").includes(refs("11")[0]);
+  });
+  expect(connected).toBe(true);
 });

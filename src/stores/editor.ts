@@ -13,6 +13,8 @@ import {
 } from "../core/osm/model";
 import { validateOsm } from "../core/osm/validation";
 import { auditGeometry } from "../core/osm/geometryAudit";
+import { busRoutes } from "../core/osm/busRoutes";
+import { TrafficModel } from "../engine/TrafficModel";
 import type { EditorTool } from "../editor/tools";
 
 export const useEditorStore = defineStore("editor", () => {
@@ -28,6 +30,11 @@ export const useEditorStore = defineStore("editor", () => {
   const vehicleClearRequest = ref(0);
   const selectedVehicle = ref<string | null>(null);
   const vehicleCount = ref(0);
+  const busCount = ref(0);
+  const busAddRequest = ref(0);
+  const selectedBusRoute = ref("");
+  const routeDraft = ref<string[]>([]);
+  const routeName = ref("");
   const trafficRunning = ref(true);
   const trafficSpeed = ref(1);
   const tool = ref<EditorTool>("select");
@@ -42,6 +49,7 @@ export const useEditorStore = defineStore("editor", () => {
   const focusRequest = ref(0);
   const focusCoordinate = ref<Coordinate | null>(null);
   const draft = ref<RoadPoint[]>([]);
+  const joinSource = ref<{ wayId: string; nodeId: string } | null>(null);
   const history = shallowRef<EditPatch[]>([]);
   const cursor = ref(0);
   const savedCursor = ref(0);
@@ -68,8 +76,22 @@ export const useEditorStore = defineStore("editor", () => {
           signals: Array.from(data.nodes.values()).filter(
             (node) => tagsOf(node).highway === "traffic_signals",
           ).length,
+          stops: Array.from(data.nodes.values()).filter((node) =>
+            tagsOf(node).public_transport === "stop_position" && tagsOf(node).bus === "yes").length,
         }
-      : { nodes: 0, roads: 0, signals: 0 };
+      : { nodes: 0, roads: 0, signals: 0, stops: 0 };
+  });
+  const stops = computed(() => {
+    revision.value;
+    return document.value ? Array.from(document.value.nodes, ([id, node]) => ({ id, name: tagsOf(node).name || `Остановка ${id}` }))
+      .filter(({ id }) => {
+        const tags = tagsOf(document.value!.nodes.get(id)!);
+        return tags.public_transport === "stop_position" && tags.bus === "yes";
+      }) : [];
+  });
+  const routes = computed(() => {
+    revision.value;
+    return document.value ? busRoutes(document.value) : [];
   });
   const selected = computed(() => {
     revision.value;
@@ -98,8 +120,13 @@ export const useEditorStore = defineStore("editor", () => {
       selectedLane.value = null;
       selectedVehicle.value = null;
       vehicleCount.value = 0;
+      busCount.value = 0;
+      selectedBusRoute.value = "";
+      routeDraft.value = [];
+      routeName.value = "";
       trafficRunning.value = true;
       draft.value = [];
+      joinSource.value = null;
       lastPatch.value = null;
       revision.value++;
       error.value = "";
@@ -184,6 +211,32 @@ export const useEditorStore = defineStore("editor", () => {
     selectedLane.value = null;
   }
 
+  function addRouteStop(id: string) {
+    if (routeDraft.value.includes(id)) {
+      error.value = "Остановка уже есть в маршруте";
+      return;
+    }
+    routeDraft.value = [...routeDraft.value, id];
+    error.value = "";
+    message.value = `В маршруте ${routeDraft.value.length} остановки`;
+  }
+
+  function finishBusRoute() {
+    if (!document.value) return;
+    const ways = new TrafficModel(document.value).routeWayIds(routeDraft.value);
+    if (!ways) {
+      error.value = "Между остановками нет проезда с учётом односторонних дорог";
+      return;
+    }
+    const patch = execute({ type: "create-bus-route", name: routeName.value, stops: routeDraft.value, ways });
+    if (patch) {
+      selectedBusRoute.value = patch.changes.find((change) => change.type === "relation" && !change.before)?.id ?? "";
+      routeDraft.value = [];
+      routeName.value = "";
+      tool.value = "select";
+    }
+  }
+
   return {
     document,
     revision,
@@ -197,6 +250,13 @@ export const useEditorStore = defineStore("editor", () => {
     vehicleDeleteRequest,
     vehicleClearRequest,
     vehicleCount,
+    busCount,
+    busAddRequest,
+    selectedBusRoute,
+    routeDraft,
+    routeName,
+    stops,
+    routes,
     trafficRunning,
     trafficSpeed,
     selected,
@@ -212,6 +272,7 @@ export const useEditorStore = defineStore("editor", () => {
     focusRequest,
     focusCoordinate,
     draft,
+    joinSource,
     history,
     cursor,
     dirty,
@@ -227,5 +288,7 @@ export const useEditorStore = defineStore("editor", () => {
     exportOsm,
     finishRoad,
     selectOsmElement,
+    addRouteStop,
+    finishBusRoute,
   };
 });
