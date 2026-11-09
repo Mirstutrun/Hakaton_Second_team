@@ -106,7 +106,13 @@ export class TrafficModel {
   }
   add(count = 1, wayId?: string): string[] {
     const ids: string[] = [];
-    const pool = wayId ? this.starts.filter((edge) => edge.wayId === wayId) : this.starts;
+    const central = this.starts.filter((edge) => {
+      const centerX = (edge.a.x + edge.b.x) / 2;
+      const centerZ = (edge.a.z + edge.b.z) / 2;
+      return centerX * centerX + centerZ * centerZ < 1200 * 1200;
+    });
+    const pool = wayId ? this.starts.filter((edge) => edge.wayId === wayId)
+      : (central.length ? central : this.starts);
     if (!pool.length) return ids;
     for (let i = 0; i < Math.min(count, 150); i++) {
       const edge = pool[Math.floor(Math.random() * pool.length)];
