@@ -1239,3 +1239,11 @@ footer { background: #fff; border-top: 1px solid #e2eaf2; color: #8298ad; height
   .tool-group { display: block !important; }
   .top-actions > button:nth-child(5) { display: inline-flex !important; }
 }
+
+.traffic-side { display:flex; align-items:center; justify-content:space-between; gap:8px; font-size:12px; margin:10px 0; }
+.traffic-side select { max-width:170px; padding:6px; border:1px solid #cbd5e1; border-radius:8px; background:white; color:#1e293b; }
+.traffic-metrics { display:grid; grid-template-columns:repeat(3,1fr); gap:6px; margin:8px 0; }
+.traffic-metrics span { background:#f1f5f9; border-radius:8px; padding:8px 4px; text-align:center; font-size:10px; }
+.traffic-metrics b { display:block; font-size:18px; color:#0f766e; }
+.traffic-note { display:block; color:#64748b; font-size:10px; line-height:1.4; }
+.traffic-dock { max-height:calc(100% - 100px); overflow-y:auto; }

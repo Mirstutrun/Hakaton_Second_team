@@ -122,6 +122,9 @@ function repair(index: number) {
       <button class="qa-more" :disabled="!store.document" @click="downloadReport">
         Скачать отчёт JSON
       </button>
+      <button class="qa-more" :disabled="!store.document" @click="store.exportReviewReport">
+        Отчёт до / после для защиты
+      </button>
       <button v-if="issueList.length > 35" class="qa-more" @click="showAll = !showAll">
         {{ showAll ? "Свернуть" : "Показать все предупреждения" }}
       </button>

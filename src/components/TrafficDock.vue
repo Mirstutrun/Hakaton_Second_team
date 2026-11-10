@@ -18,6 +18,18 @@ function removeRoute() {
       <div><strong>Движение транспорта</strong><small>Машин: {{ store.vehicleCount - store.busCount }} · Автобусов: {{ store.busCount }}</small></div>
       <span class="traffic-status">{{ store.trafficRunning ? "Движутся" : "Пауза" }}</span>
     </div>
+    <label class="traffic-side">Сторона движения
+      <select v-model="store.drivingSide" aria-label="Сторона движения">
+        <option value="left">Левостороннее</option>
+        <option value="right">Правостороннее</option>
+      </select>
+    </label>
+    <div class="traffic-metrics" aria-live="off">
+      <span><b>{{ store.trafficMetrics.moving }}</b> в движении</span>
+      <span><b>{{ store.trafficMetrics.stopped }}</b> ожидают</span>
+      <span><b>{{ store.trafficMetrics.averageKmh.toFixed(0) }}</b> км/ч в среднем</span>
+    </div>
+    <small class="traffic-note">Локальный предпросмотр · сторона движения не меняет OSM. При переключении транспорт создаётся заново.</small>
     <div class="traffic-main-actions">
       <button class="traffic-add" :disabled="!store.document"
         @click="store.vehicleAddBatchRequest++">+ 10 машин</button>

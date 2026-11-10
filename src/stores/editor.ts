@@ -1,5 +1,6 @@
 import { computed, markRaw, ref, shallowRef } from "vue";
 import { defineStore } from "pinia";
+import { reviewBaseline, reviewReport } from "../core/osm/reviewReport";
 import { parseOsm } from "../core/osm/parser";
 import { serializeOsm } from "../core/osm/serializer";
 import { applyEdit, applyPatch, type EditCommand } from "../core/osm/commands";
@@ -18,6 +19,7 @@ import { TrafficModel } from "../engine/TrafficModel";
 import type { EditorTool } from "../editor/tools";
 
 export const useEditorStore = defineStore("editor", () => {
+  let baseline: ReturnType<typeof reviewBaseline> | null = null;
   const document = shallowRef<OsmDocument | null>(null);
   const revision = ref(0);
   const lastPatch = shallowRef<EditPatch | null>(null);
@@ -37,6 +39,8 @@ export const useEditorStore = defineStore("editor", () => {
   const routeName = ref("");
   const trafficRunning = ref(true);
   const trafficSpeed = ref(1);
+  const drivingSide = ref<"left" | "right">("left");
+  const trafficMetrics = ref({ stopped: 0, moving: 0, averageKmh: 0 });
   const tool = ref<EditorTool>("select");
   const view = ref<"3d" | "2d">("2d");
   const buildings = ref(true);
@@ -111,6 +115,7 @@ export const useEditorStore = defineStore("editor", () => {
         (issue) => issue.severity === "error",
       );
       if (errors.length) throw new Error(errors[0].message);
+      baseline = reviewBaseline(next);
       document.value = markRaw(next);
       fileName.value = name;
       history.value = [];
@@ -192,6 +197,19 @@ export const useEditorStore = defineStore("editor", () => {
     }
   }
 
+  function exportReviewReport() {
+    if (!document.value || !baseline) return;
+    const report = { source: fileName.value, ...reviewReport(baseline, document.value),
+      edits: history.value.slice(0, cursor.value).map(patch => patch.label) };
+    const url = URL.createObjectURL(new Blob([JSON.stringify(report, null, 2)], { type: "application/json" }));
+    const link = window.document.createElement("a");
+    link.href = url;
+    link.download = fileName.value.replace(/\.(osm|xml)$/i, "") + "-before-after.json";
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    message.value = "Отчёт до/после экспортирован";
+  }
+
   function finishRoad() {
     if (
       execute({
@@ -259,6 +277,8 @@ export const useEditorStore = defineStore("editor", () => {
     routes,
     trafficRunning,
     trafficSpeed,
+    drivingSide,
+    trafficMetrics,
     selected,
     tool,
     view,
@@ -286,6 +306,7 @@ export const useEditorStore = defineStore("editor", () => {
     undo,
     redo,
     exportOsm,
+    exportReviewReport,
     finishRoad,
     selectOsmElement,
     addRouteStop,

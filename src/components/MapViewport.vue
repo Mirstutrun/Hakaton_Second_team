@@ -55,6 +55,7 @@ watch(
   () => store.vehicleClearRequest,
   () => manager?.clearVehicles(),
 );
+watch(() => store.drivingSide, () => { manager?.resetTrafficAfterEdit(); manager?.addVehicles(18); });
 watch(() => store.busAddRequest, () => manager?.addBus());
 watch(() => store.selectedBusRoute, () => manager?.refreshRoute());
 watch(

@@ -6,6 +6,7 @@ import {
   type Scene,
   type Material,
 } from "@babylonjs/core";
+import { oneWayDirection } from "../trafficRules";
 import type { Tags } from "../../core/osm/model";
 
 export const pedestrianTypes = new Set([
@@ -21,22 +22,22 @@ export function roadStyle(tags: Tags) {
   const pedestrian = pedestrianTypes.has(tags.highway);
   const lanes =
     Number(tags.lanes) ||
+    ((Number(tags["lanes:forward"]) || 0) + (Number(tags["lanes:backward"]) || 0) + (Number(tags["lanes:both_ways"]) || 0)) ||
     (pedestrian ||
-    tags.oneway === "yes" ||
-    tags.oneway === "-1" ||
+    oneWayDirection(tags) !== 0 ||
     tags.highway === "service"
       ? 1
       : 2);
   const explicitWidth = Number.parseFloat(tags.width);
   return {
     pedestrian,
-    lanes: Math.min(20, Math.max(1, lanes)),
+    lanes: Math.min(20, Math.max(1, Math.floor(lanes))),
     width:
       Number.isFinite(explicitWidth) && explicitWidth > 0
         ? explicitWidth
         : pedestrian
           ? 2.2
-          : Math.min(20, Math.max(1, lanes)) * 3.4,
+          : Math.min(20, Math.max(1, Math.floor(lanes))) * 3.4,
     elevation:
       0.18 +
       (Number(tags.layer) ||
@@ -220,13 +221,13 @@ export function buildRoad(
       markings.metadata = { role: "markings" };
       result.push(markings);
     }
-    if (tags.oneway === "yes" || tags.oneway === "-1") {
+    if (oneWayDirection(tags) !== 0) {
       const a = path[0],
         b = path[1];
       const direction = b
         .subtract(a)
         .normalize()
-        .scale(tags.oneway === "-1" ? -1 : 1);
+        .scale(oneWayDirection(tags));
       const center = Vector3.Center(a, b).add(new Vector3(0, 0.1, 0));
       const side = new Vector3(-direction.z, 0, direction.x);
       const arrow = MeshBuilder.CreateLines(

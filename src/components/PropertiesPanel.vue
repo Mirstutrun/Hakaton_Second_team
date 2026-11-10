@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from "vue";
 import { coordinateOf, refsOf, tagsOf } from "../core/osm/model";
+import { laneTagInfo } from "../engine/trafficRules";
 import { roadStyle } from "../engine/geometry/roads";
 import { useEditorStore } from "../stores/editor";
 
@@ -26,22 +27,8 @@ const laneInfo = computed(() => {
   const count = roadStyle(tag).lanes;
   const lane = store.selectedLane;
   if (lane < 0 || lane >= count || roadStyle(tag).pedestrian) return null;
-  const oneway = tag.oneway === "yes" || tag.oneway === "-1" ||
-    tag.junction === "roundabout";
-  const backwards = tag.oneway === "-1";
-  if (oneway) {
-    return { index: backwards ? count - lane - 1 : lane, count,
-      suffix: backwards ? ":backward" : "",
-      direction: backwards ? "Против направления way" : "По направлению way" };
-  }
-  const backwardCount = Math.max(1, Number(tag["lanes:backward"]) ||
-    Math.floor(count / 2));
-  const backward = lane < backwardCount;
-  return backward
-    ? { index: backwardCount - lane - 1, count: backwardCount,
-        suffix: ":backward", direction: "Обратное направление" }
-    : { index: lane - backwardCount, count: Math.max(1, count - backwardCount),
-        suffix: ":forward", direction: "Прямое направление" };
+  return laneTagInfo(tag, count, lane, store.drivingSide);
+
 });
 function laneTagKey(kind: string): string {
   return `${kind}:lanes${laneInfo.value?.suffix || ""}`;
@@ -51,7 +38,7 @@ function laneValue(kind: string): string {
   if (!info) return "";
   return (tags.value[laneTagKey(kind)] ?? "").split("|")[info.index] ?? "";
 }
-watch(() => [store.selectedLane, store.selection, store.revision], () => {
+watch(() => [store.selectedLane, store.selection, store.revision, store.drivingSide], () => {
   laneForm.turn = laneValue("turn");
   laneForm.change = laneValue("change");
   laneForm.maxspeed = laneValue("maxspeed");
@@ -113,7 +100,7 @@ const fields = [
   "traffic_signals:direction",
 ];
 watch(
-  () => [store.selection, store.revision],
+  () => [store.selection, store.revision, store.drivingSide],
   () => {
     for (const key of fields) form[key] = tags.value[key] ?? "";
     confirmDelete.value = false;

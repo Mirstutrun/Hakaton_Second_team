@@ -181,7 +181,7 @@ export class SceneManager {
     this.wayMeshes.clear();
     this.signalMeshes.clear();
     this.clearVehicles();
-    this.traffic = new TrafficModel(document);
+    this.traffic = new TrafficModel(document, this.store.drivingSide);
     this.refreshRoute();
     this.rebuildJunctionCounts();
     for (const id of document.ways.keys()) this.refreshWay(id);
@@ -317,9 +317,9 @@ export class SceneManager {
     this.visibility();
   }
 
-  private resetTrafficAfterEdit() {
+  resetTrafficAfterEdit() {
     this.clearVehicles();
-    if (this.document) this.traffic = new TrafficModel(this.document);
+    if (this.document) this.traffic = new TrafficModel(this.document, this.store.drivingSide);
     this.refreshRoute();
   }
 
@@ -351,10 +351,9 @@ export class SceneManager {
     const progress = Math.max(0.02, Math.min(0.96,
       Vector3.Dot(position.subtract(a), delta) / (delta.lengthSquared() || 1)));
     const lane = this.laneAtPoint(wayId, position) ?? 0;
-    const id = this.traffic.addAt(wayId, from, to, progress, lane) ??
-      this.traffic.addAt(wayId, to, from, 1 - progress, lane);
+    const id = this.traffic.addOnLane(wayId, from, to, progress, lane);
     if (!id) {
-      this.store.error = "На выбранной дороге нет доступного направления движения";
+      this.store.error = "Полоса занята или не предназначена для движения в этом направлении";
       return;
     }
     this.spawnCarMesh(id);
@@ -437,10 +436,15 @@ export class SceneManager {
     this.store.busCount = 0;
   }
 
+  private lastMetricsUpdate = 0;
   private tickTraffic() {
     if (!this.traffic) return;
     if (this.store.trafficRunning)
       this.traffic.update(this.engine.getDeltaTime() / 1000, this.store.trafficSpeed);
+    if (performance.now() - this.lastMetricsUpdate > 250) {
+      this.store.trafficMetrics = this.traffic.metrics;
+      this.lastMetricsUpdate = performance.now();
+    }
     for (const [id, mesh] of this.vehicleMeshes) {
       const car = this.traffic.cars.get(id);
       if (!car) continue;
