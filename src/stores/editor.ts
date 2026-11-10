@@ -37,7 +37,12 @@ export const useEditorStore = defineStore("editor", () => {
   const selectedBusRoute = ref("");
   const routeDraft = ref<string[]>([]);
   const routeName = ref("");
-  const trafficRunning = ref(true);
+  const workspaceMode = ref<"edit" | "traffic" | "review">("edit");
+  const helpOpen = ref(false);
+  const inspectorOpen = ref(false);
+  const zoomRequest = ref(0);
+  const fitRequest = ref(0);
+  const trafficRunning = ref(false);
   const trafficSpeed = ref(1);
   const drivingSide = ref<"left" | "right">("left");
   const trafficMetrics = ref({ stopped: 0, moving: 0, averageKmh: 0 });
@@ -80,18 +85,27 @@ export const useEditorStore = defineStore("editor", () => {
           signals: Array.from(data.nodes.values()).filter(
             (node) => tagsOf(node).highway === "traffic_signals",
           ).length,
-          stops: Array.from(data.nodes.values()).filter((node) =>
-            tagsOf(node).public_transport === "stop_position" && tagsOf(node).bus === "yes").length,
+          stops: Array.from(data.nodes.values()).filter(
+            (node) =>
+              tagsOf(node).public_transport === "stop_position" &&
+              tagsOf(node).bus === "yes",
+          ).length,
         }
       : { nodes: 0, roads: 0, signals: 0, stops: 0 };
   });
   const stops = computed(() => {
     revision.value;
-    return document.value ? Array.from(document.value.nodes, ([id, node]) => ({ id, name: tagsOf(node).name || `Остановка ${id}` }))
-      .filter(({ id }) => {
-        const tags = tagsOf(document.value!.nodes.get(id)!);
-        return tags.public_transport === "stop_position" && tags.bus === "yes";
-      }) : [];
+    return document.value
+      ? Array.from(document.value.nodes, ([id, node]) => ({
+          id,
+          name: tagsOf(node).name || `Остановка ${id}`,
+        })).filter(({ id }) => {
+          const tags = tagsOf(document.value!.nodes.get(id)!);
+          return (
+            tags.public_transport === "stop_position" && tags.bus === "yes"
+          );
+        })
+      : [];
   });
   const routes = computed(() => {
     revision.value;
@@ -199,12 +213,18 @@ export const useEditorStore = defineStore("editor", () => {
 
   function exportReviewReport() {
     if (!document.value || !baseline) return;
-    const report = { source: fileName.value, ...reviewReport(baseline, document.value),
-      edits: history.value.slice(0, cursor.value).map(patch => patch.label) };
-    const url = URL.createObjectURL(new Blob([JSON.stringify(report, null, 2)], { type: "application/json" }));
+    const report = {
+      source: fileName.value,
+      ...reviewReport(baseline, document.value),
+      edits: history.value.slice(0, cursor.value).map((patch) => patch.label),
+    };
+    const url = URL.createObjectURL(
+      new Blob([JSON.stringify(report, null, 2)], { type: "application/json" }),
+    );
     const link = window.document.createElement("a");
     link.href = url;
-    link.download = fileName.value.replace(/\.(osm|xml)$/i, "") + "-before-after.json";
+    link.download =
+      fileName.value.replace(/\.(osm|xml)$/i, "") + "-before-after.json";
     link.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
     message.value = "Отчёт до/после экспортирован";
@@ -224,6 +244,7 @@ export const useEditorStore = defineStore("editor", () => {
   }
 
   function selectOsmElement(target: Selection | null) {
+    if (target) inspectorOpen.value = true;
     selection.value = target;
     selectedVertex.value = target?.type === "node" ? target.id : null;
     selectedLane.value = null;
@@ -243,12 +264,21 @@ export const useEditorStore = defineStore("editor", () => {
     if (!document.value) return;
     const ways = new TrafficModel(document.value).routeWayIds(routeDraft.value);
     if (!ways) {
-      error.value = "Между остановками нет проезда с учётом односторонних дорог";
+      error.value =
+        "Между остановками нет проезда с учётом односторонних дорог";
       return;
     }
-    const patch = execute({ type: "create-bus-route", name: routeName.value, stops: routeDraft.value, ways });
+    const patch = execute({
+      type: "create-bus-route",
+      name: routeName.value,
+      stops: routeDraft.value,
+      ways,
+    });
     if (patch) {
-      selectedBusRoute.value = patch.changes.find((change) => change.type === "relation" && !change.before)?.id ?? "";
+      selectedBusRoute.value =
+        patch.changes.find(
+          (change) => change.type === "relation" && !change.before,
+        )?.id ?? "";
       routeDraft.value = [];
       routeName.value = "";
       tool.value = "select";
@@ -275,6 +305,11 @@ export const useEditorStore = defineStore("editor", () => {
     routeName,
     stops,
     routes,
+    workspaceMode,
+    helpOpen,
+    inspectorOpen,
+    zoomRequest,
+    fitRequest,
     trafficRunning,
     trafficSpeed,
     drivingSide,
