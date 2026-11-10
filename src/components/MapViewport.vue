@@ -1,12 +1,14 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { SceneManager } from "../engine/SceneManager";
-import QualityDock from "./QualityDock.vue";
-import TrafficDock from "./TrafficDock.vue";
+import { editorTools } from "../editor/tools";
 import { useEditorStore } from "../stores/editor";
 
 const canvas = ref<HTMLCanvasElement>();
 const store = useEditorStore();
+const activeTool = computed(() =>
+  editorTools.find((tool) => tool.id === store.tool)!,
+);
 let manager: SceneManager | undefined;
 onMounted(() => {
   try {
@@ -36,6 +38,29 @@ watch(
   () => manager?.setView(),
 );
 watch(
+  () => store.tool,
+  () => manager?.refreshSelection(),
+);
+watch(
+  () => store.showGraphIssues,
+  () => {
+    manager?.refreshSelection();
+    manager?.visibility();
+  },
+);
+watch(
+  () => store.workspaceMode,
+  () => manager?.visibility(),
+);
+watch(
+  () => store.zoomRequest,
+  (value, previous) => manager?.zoom(value > previous ? 0.75 : 1.33),
+);
+watch(
+  () => store.fitRequest,
+  () => manager?.fitMap(),
+);
+watch(
   () => [store.buildings, store.markings, store.pedestrians],
   () => manager?.visibility(),
 );
@@ -55,8 +80,21 @@ watch(
   () => store.vehicleClearRequest,
   () => manager?.clearVehicles(),
 );
-watch(() => store.busAddRequest, () => manager?.addBus());
-watch(() => store.selectedBusRoute, () => manager?.refreshRoute());
+watch(
+  () => store.drivingSide,
+  () => {
+    manager?.refreshDrivingSide();
+    manager?.addVehicles(18);
+  },
+);
+watch(
+  () => store.busAddRequest,
+  () => manager?.addBus(),
+);
+watch(
+  () => store.selectedBusRoute,
+  () => manager?.refreshRoute(),
+);
 watch(
   () => store.focusRequest,
   () => manager?.focus(),
@@ -77,13 +115,24 @@ onBeforeUnmount(() => manager?.dispose());
     ></canvas>
     <div class="viewport-title">
       <span class="live-dot"></span> {{ store.fileName }}
-      <span class="muted">/ {{ store.view.toUpperCase() }}</span>
+      <span class="muted">{{
+        store.view === "2d" ? "Вид сверху" : "Объёмный вид"
+      }}</span>
     </div>
     <div class="compass"><span>N</span><b>↑</b><small>СЕВЕР</small></div>
-    <div class="map-credit">
-      © OpenStreetMap contributors
-    </div>
+    <div class="map-credit">© OpenStreetMap contributors</div>
     <div class="view-controls">
+      <div class="zoom-controls">
+        <button aria-label="Приблизить" @click="store.zoomRequest++">+</button
+        ><button aria-label="Отдалить" @click="store.zoomRequest--">−</button>
+      </div>
+      <button
+        aria-label="Вся карта"
+        title="Показать всю карту"
+        @click="store.fitRequest++"
+      >
+        ⊞
+      </button>
       <div class="segmented">
         <button
           :class="{ active: store.view === '3d' }"
@@ -105,11 +154,73 @@ onBeforeUnmount(() => manager?.dispose());
         ⌖
       </button>
     </div>
-    <QualityDock />
-    <TrafficDock />
+    <div v-if="store.document" class="map-instruction" role="status">
+      <span class="instruction-icon">{{
+        store.tool === "select" ? "↖" : "+"
+      }}</span>
+      <div>
+        <strong>{{ activeTool.name }}</strong>
+        <p>
+          {{
+            store.tool === "join" && store.joinSource
+              ? `Конец дороги ${store.joinSource.wayId} выбран. Теперь нажмите на другую дорогу или её узел.`
+              : activeTool.hint
+          }}
+        </p>
+      </div>
+      <button
+        v-if="store.tool !== 'select'"
+        @click="
+          store.tool = 'select';
+          store.draft = [];
+          store.routeDraft = [];
+          store.joinSource = null;
+        "
+      >
+        Готово · Esc
+      </button>
+    </div>
+    <div class="map-legend" aria-label="Обозначения карты">
+      <span><i class="legend-road"></i>Дорога</span
+      ><span><i class="legend-building"></i>Здание</span
+      ><span><i class="legend-selected"></i>Выбрано</span>
+      <span v-if="store.showGraphIssues"
+        ><i class="legend-issue"></i>Проверить</span
+      >
+    </div>
+    <button
+      class="mobile-tools"
+      @click="
+        store.toolsOpen = !store.toolsOpen;
+        store.inspectorOpen = false;
+      "
+      :aria-expanded="store.toolsOpen"
+    >
+      {{ store.toolsOpen ? "Скрыть инструменты" : "Инструменты" }}
+    </button>
+    <button
+      class="mobile-inspector"
+      @click="store.inspectorOpen = !store.inspectorOpen"
+    >
+      {{
+        store.workspaceMode === "review"
+          ? store.inspectorOpen
+            ? "Закрыть проверку"
+            : "Показать проверку"
+          : store.inspectorOpen
+            ? "Закрыть свойства"
+            : "Свойства объекта"
+      }}
+    </button>
     <div v-if="store.loading" class="loading">
       <div class="spinner"></div>
       Подготовка дорожной сети…
+    </div>
+    <div v-if="['building','courtyard'].includes(store.tool)" class="draw-card">
+      <span>{{store.tool === 'courtyard'?'Контур двора':'Контур здания'}} · {{store.draft.length}} точек</span>
+      <button class="primary" :disabled="store.draft.length<3" @click="store.finishArea()">Завершить ↵</button>
+      <button :disabled="!store.draft.length" @click="store.draft.pop()">Убрать последнюю</button>
+      <button @click="store.draft=[];store.tool='select'">Отмена</button>
     </div>
     <div v-if="store.tool === 'draw'" class="draw-card">
       <span
@@ -130,16 +241,35 @@ onBeforeUnmount(() => manager?.dispose());
       </button>
     </div>
     <div v-if="store.tool === 'bus-route'" class="draw-card route-card">
-      <span>Маршрут <b>{{ store.routeDraft.length }} остановки</b></span>
-      <input v-model="store.routeName" aria-label="Название маршрута" placeholder="Например, автобус 1" />
-      <button class="primary" :disabled="store.routeDraft.length < 2 || !store.routeName.trim()"
-        @click="store.finishBusRoute()">Сохранить маршрут</button>
-      <button :disabled="!store.routeDraft.length" @click="store.routeDraft.pop()">Убрать последнюю</button>
-      <button @click="store.routeDraft = []; store.tool = 'select'">Отмена</button>
-    </div>
-    <div v-if="store.tool === 'join'" class="draw-card join-card">
-      <span>{{ store.joinSource ? `Конец дороги ${store.joinSource.wayId} выбран. Нажмите на другую дорогу.` : 'Выберите свободный конец дороги' }}</span>
-      <button @click="store.joinSource = null; store.tool = 'select'">Отмена</button>
+      <span
+        >Маршрут <b>{{ store.routeDraft.length }} остановки</b></span
+      >
+      <input
+        v-model="store.routeName"
+        aria-label="Название маршрута"
+        placeholder="Например, автобус 1"
+      />
+      <button
+        class="primary"
+        :disabled="store.routeDraft.length < 2 || !store.routeName.trim()"
+        @click="store.finishBusRoute()"
+      >
+        Сохранить маршрут
+      </button>
+      <button
+        :disabled="!store.routeDraft.length"
+        @click="store.routeDraft.pop()"
+      >
+        Убрать последнюю
+      </button>
+      <button
+        @click="
+          store.routeDraft = [];
+          store.tool = 'select';
+        "
+      >
+        Отмена
+      </button>
     </div>
   </main>
 </template>

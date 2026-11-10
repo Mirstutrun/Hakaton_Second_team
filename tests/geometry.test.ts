@@ -23,26 +23,38 @@ describe("geometry quality assurance", () => {
   it("finds roads crossing without a shared node and roads through buildings", () => {
     const doc = parseOsm(crossing);
     const issues = auditGeometry(doc);
-    expect(issues.some((issue) => issue.code === "unconnected-crossing")).toBe(true);
-    expect(issues.some((issue) => issue.code === "road-building-overlap")).toBe(true);
-    expect(issues.some((issue) => issue.code === "isolated-component")).toBe(true);
+    expect(issues.some((issue) => issue.code === "unconnected-crossing")).toBe(
+      true,
+    );
+    expect(issues.some((issue) => issue.code === "road-building-overlap")).toBe(
+      true,
+    );
+    expect(issues.some((issue) => issue.code === "isolated-component")).toBe(
+      true,
+    );
   });
 
   it("joins an at-grade crossing transactionally and survives OSM roundtrip", () => {
     const doc = parseOsm(crossing);
-    const suggestion = auditGeometry(doc).find((issue) =>
-      issue.code === "unconnected-crossing" && issue.fix);
+    const suggestion = auditGeometry(doc).find(
+      (issue) => issue.code === "unconnected-crossing" && issue.fix,
+    );
     expect(suggestion?.fix).toBeDefined();
     const fix = suggestion!.fix!;
-    if (fix.kind !== "connect-crossing") throw new Error("Ожидалось пересечение");
+    if (fix.kind !== "connect-crossing")
+      throw new Error("Ожидалось пересечение");
     const patch = applyEdit(doc, { type: "connect-crossing", ...fix });
     const a = refsOf(doc.ways.get("10")!);
     const b = refsOf(doc.ways.get("11")!);
     expect(a).toHaveLength(3);
     expect(b).toHaveLength(3);
     expect(a[1]).toBe(b[1]);
-    expect(auditGeometry(doc).some((issue) => issue.code === "unconnected-crossing")).toBe(false);
-    expect(auditGeometry(doc).some((issue) => issue.code === "isolated-component")).toBe(false);
+    expect(
+      auditGeometry(doc).some((issue) => issue.code === "unconnected-crossing"),
+    ).toBe(false);
+    expect(
+      auditGeometry(doc).some((issue) => issue.code === "isolated-component"),
+    ).toBe(false);
     expect(serializeOsm(parseOsm(serializeOsm(doc)))).toBe(serializeOsm(doc));
     applyPatch(doc, patch, "before");
     expect(serializeOsm(doc)).toBe(crossing);
@@ -56,11 +68,19 @@ describe("geometry quality assurance", () => {
       '<tag k="highway" v="residential"/><tag k="bridge" v="yes"/><tag k="layer" v="1"/></way>\n<way id="12">',
     );
     const doc = parseOsm(source);
-    expect(auditGeometry(doc).some((issue) => issue.code === "unconnected-crossing")).toBe(false);
-    expect(() => applyEdit(doc, {
-      type: "connect-crossing", wayA: "10", indexA: 1, wayB: "11",
-      indexB: 1, coordinate: { lat: 52.0001, lon: 104.0001 },
-    })).toThrow("уровни");
+    expect(
+      auditGeometry(doc).some((issue) => issue.code === "unconnected-crossing"),
+    ).toBe(false);
+    expect(() =>
+      applyEdit(doc, {
+        type: "connect-crossing",
+        wayA: "10",
+        indexA: 1,
+        wayB: "11",
+        indexB: 1,
+        coordinate: { lat: 52.0001, lon: 104.0001 },
+      }),
+    ).toThrow("уровни");
   });
 
   it("snaps a near-miss endpoint into a shared OSM node and undoes cleanly", () => {
@@ -73,14 +93,23 @@ describe("geometry quality assurance", () => {
       <way id="11"><nd ref="3"/><nd ref="4"/><tag k="highway" v="residential"/></way>
     </osm>`;
     const doc = parseOsm(source);
-    const suggestion = auditGeometry(doc).find((issue) =>
-      issue.code === "near-disconnection" && issue.fix?.kind === "attach-endpoint");
+    const suggestion = auditGeometry(doc).find(
+      (issue) =>
+        issue.code === "near-disconnection" &&
+        issue.fix?.kind === "attach-endpoint",
+    );
     expect(suggestion?.fix?.kind).toBe("attach-endpoint");
-    if (suggestion?.fix?.kind !== "attach-endpoint") throw new Error("No snap suggestion");
-    const patch = applyEdit(doc, { type: "attach-endpoint", ...suggestion.fix });
+    if (suggestion?.fix?.kind !== "attach-endpoint")
+      throw new Error("No snap suggestion");
+    const patch = applyEdit(doc, {
+      type: "attach-endpoint",
+      ...suggestion.fix,
+    });
     expect(refsOf(doc.ways.get("10")!)).toContain("3");
     expect(refsOf(doc.ways.get("11")!)).toContain("3");
-    expect(auditGeometry(doc).some((issue) => issue.code === "near-disconnection")).toBe(false);
+    expect(
+      auditGeometry(doc).some((issue) => issue.code === "near-disconnection"),
+    ).toBe(false);
     applyPatch(doc, patch, "before");
     expect(serializeOsm(doc)).toBe(source);
   });
@@ -88,10 +117,51 @@ describe("geometry quality assurance", () => {
   it("refuses to create a stale or off-segment junction", () => {
     const doc = parseOsm(crossing);
     const source = serializeOsm(doc);
-    expect(() => applyEdit(doc, {
-      type: "connect-crossing", wayA: "10", indexA: 1, wayB: "11",
-      indexB: 1, coordinate: { lat: 52.00015, lon: 104.00019 },
-    })).toThrow("не лежит");
+    expect(() =>
+      applyEdit(doc, {
+        type: "connect-crossing",
+        wayA: "10",
+        indexA: 1,
+        wayB: "11",
+        indexB: 1,
+        coordinate: { lat: 52.00015, lon: 104.00019 },
+      }),
+    ).toThrow("не лежит");
     expect(serializeOsm(doc)).toBe(source);
   });
+});
+
+it("building roofs face up and facade colours stay within one mesh", async () => {
+  const { NullEngine, Scene, StandardMaterial, VertexBuffer, Vector3 } =
+    await import("@babylonjs/core");
+  const { buildBuilding } = await import("../src/engine/geometry/buildings");
+  const engine = new NullEngine();
+  const scene = new Scene(engine);
+  const material = new StandardMaterial("building", scene);
+  for (const reverse of [false, true]) {
+    const points = [
+      new Vector3(0, 0, 0),
+      new Vector3(20, 0, 0),
+      new Vector3(20, 0, 10),
+      new Vector3(0, 0, 10),
+    ];
+    if (reverse) points.reverse();
+    const mesh = buildBuilding(
+      "123",
+      points,
+      { height: "15", min_height: "3" },
+      scene,
+      material,
+    )!;
+    expect(mesh.getBoundingInfo().boundingBox.minimum.y).toBe(3);
+    expect(mesh.getBoundingInfo().boundingBox.maximum.y).toBe(15);
+    const normals = mesh.getVerticesData(VertexBuffer.NormalKind)!;
+    for (let i = 0; i < 4; i++) expect(normals[i * 3 + 1]).toBeGreaterThan(0.9);
+    expect(mesh.getVerticesData(VertexBuffer.ColorKind)).toHaveLength(
+      mesh.getTotalVertices() * 4,
+    );
+    expect(mesh.isPickable).toBe(false);
+  }
+  scene.dispose();
+  engine.dispose();
 });

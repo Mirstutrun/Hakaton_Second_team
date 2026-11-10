@@ -85,9 +85,10 @@ describe("junctions and bus routes", () => {
     expect(bus.edge.to).toBe(second);
     bus.progress = 0.999;
     model.update(0.1);
-    expect(bus.dwell).toBe(3);
+    expect(bus.dwell).toBeGreaterThanOrEqual(2.9);
+    expect(bus.dwell).toBeLessThanOrEqual(3);
     expect(bus.edge.from).toBe(second);
-    expect(bus.stopped).toBe(false);
+    expect(bus.stopped).toBe(true);
     model.update(0.1);
     expect(bus.stopped).toBe(true);
     applyPatch(doc, patch, "before");

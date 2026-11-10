@@ -1,3 +1,4 @@
+import { networkConnectivity } from "../core/osm/connectivity";
 import { computed, markRaw, ref, shallowRef } from "vue";
 import { defineStore } from "pinia";
 import { parseOsm } from "../core/osm/parser";
@@ -5,6 +6,8 @@ import { serializeOsm } from "../core/osm/serializer";
 import { applyEdit, applyPatch, type EditCommand } from "../core/osm/commands";
 import {
   tagsOf,
+  refsOf,
+  coordinateOf,
   type EditPatch,
   type Coordinate,
   type OsmDocument,
@@ -35,8 +38,18 @@ export const useEditorStore = defineStore("editor", () => {
   const selectedBusRoute = ref("");
   const routeDraft = ref<string[]>([]);
   const routeName = ref("");
-  const trafficRunning = ref(true);
+  const workspaceMode = ref<"edit" | "traffic" | "review">("edit");
+  const helpOpen = ref(false);
+  const showGraphIssues = ref(true);
+  const preflightOpen = ref(false);
+  const inspectorOpen = ref(false);
+  const toolsOpen = ref(false);
+  const zoomRequest = ref(0);
+  const fitRequest = ref(0);
+  const trafficRunning = ref(false);
   const trafficSpeed = ref(1);
+  const drivingSide = ref<"left" | "right">("left");
+  const trafficMetrics = ref({ stopped: 0, moving: 0, averageKmh: 0 });
   const tool = ref<EditorTool>("select");
   const view = ref<"3d" | "2d">("2d");
   const buildings = ref(true);
@@ -49,6 +62,8 @@ export const useEditorStore = defineStore("editor", () => {
   const focusRequest = ref(0);
   const focusCoordinate = ref<Coordinate | null>(null);
   const draft = ref<RoadPoint[]>([]);
+  const courtyardOwner=ref("");
+  const passageProposal=ref<{wayId:string;buildingId:string}|null>(null);
   const joinSource = ref<{ wayId: string; nodeId: string } | null>(null);
   const history = shallowRef<EditPatch[]>([]);
   const cursor = ref(0);
@@ -64,6 +79,50 @@ export const useEditorStore = defineStore("editor", () => {
     revision.value;
     return document.value ? validateOsm(document.value) : [];
   });
+  const connectivity = computed(() => {
+    revision.value;
+    return document.value ? networkConnectivity(document.value) : null;
+  });
+  const graphIssues = computed(() => {
+    const doc = document.value;
+    return [...issues.value, ...geometryIssues.value].map((issue) => {
+      const type =
+        issue.elementType ??
+        (issue.id && doc?.nodes.has(issue.id)
+          ? "node"
+          : issue.id && doc?.ways.has(issue.id)
+            ? "way"
+            : undefined);
+      let coordinate = issue.coordinate;
+      if (!coordinate && issue.id && doc) {
+        const node =
+          type === "node"
+            ? doc.nodes.get(issue.id)
+            : type === "way"
+              ? doc.nodes.get(refsOf(doc.ways.get(issue.id)!)[0])
+              : undefined;
+        if (node) coordinate = coordinateOf(node);
+      }
+      return { ...issue, elementType: type, coordinate };
+    });
+  });
+  const preflight = computed(() => ({
+    errors: issues.value.filter((i) => i.severity === "error"),
+    conflicts: geometryIssues.value.filter((i) =>
+      ["road-building-overlap", "unconnected-crossing", "zero-length", "limit"].includes(
+        i.code || "",
+      ),
+    ),
+    components: connectivity.value?.components.length ?? 0,
+    directedComponents: connectivity.value?.directedComponents ?? 0,
+  }));
+  const canExportChecked = computed(
+    () =>
+      !!document.value &&
+      preflight.value.errors.length === 0 &&
+      preflight.value.conflicts.length === 0 &&
+      preflight.value.components === 1,
+  );
   const stats = computed(() => {
     revision.value;
     const data = document.value;
@@ -76,18 +135,27 @@ export const useEditorStore = defineStore("editor", () => {
           signals: Array.from(data.nodes.values()).filter(
             (node) => tagsOf(node).highway === "traffic_signals",
           ).length,
-          stops: Array.from(data.nodes.values()).filter((node) =>
-            tagsOf(node).public_transport === "stop_position" && tagsOf(node).bus === "yes").length,
+          stops: Array.from(data.nodes.values()).filter(
+            (node) =>
+              tagsOf(node).public_transport === "stop_position" &&
+              tagsOf(node).bus === "yes",
+          ).length,
         }
       : { nodes: 0, roads: 0, signals: 0, stops: 0 };
   });
   const stops = computed(() => {
     revision.value;
-    return document.value ? Array.from(document.value.nodes, ([id, node]) => ({ id, name: tagsOf(node).name || `Остановка ${id}` }))
-      .filter(({ id }) => {
-        const tags = tagsOf(document.value!.nodes.get(id)!);
-        return tags.public_transport === "stop_position" && tags.bus === "yes";
-      }) : [];
+    return document.value
+      ? Array.from(document.value.nodes, ([id, node]) => ({
+          id,
+          name: tagsOf(node).name || `Остановка ${id}`,
+        })).filter(({ id }) => {
+          const tags = tagsOf(document.value!.nodes.get(id)!);
+          return (
+            tags.public_transport === "stop_position" && tags.bus === "yes"
+          );
+        })
+      : [];
   });
   const routes = computed(() => {
     revision.value;
@@ -119,6 +187,7 @@ export const useEditorStore = defineStore("editor", () => {
       selectedVertex.value = null;
       selectedLane.value = null;
       selectedVehicle.value = null;
+      passageProposal.value=null;courtyardOwner.value="";
       vehicleCount.value = 0;
       busCount.value = 0;
       selectedBusRoute.value = "";
@@ -172,8 +241,21 @@ export const useEditorStore = defineStore("editor", () => {
     message.value = "Действие повторено";
   }
 
-  function exportOsm() {
+  function exportOsm(mode: "checked" | "draft" | "confirm" = "checked") {
     if (!document.value) return;
+    if (
+      mode !== "draft" &&
+      (!canExportChecked.value ||
+        (mode === "checked" && preflight.value.directedComponents > 1))
+    ) {
+      preflightOpen.value = true;
+      showGraphIssues.value = true;
+      workspaceMode.value = "review";
+      inspectorOpen.value = true;
+      message.value =
+        "Перед сохранением проверьте связность и выделенные ошибки";
+      return;
+    }
     try {
       const source = serializeOsm(document.value);
       const url = URL.createObjectURL(
@@ -181,17 +263,29 @@ export const useEditorStore = defineStore("editor", () => {
       );
       const link = window.document.createElement("a");
       link.href = url;
-      link.download = fileName.value.replace(/\.osm$/i, "") + "-edited.osm";
+      link.download =
+        fileName.value.replace(/\.(osm|xml)$/i, "") +
+        (mode === "draft" ? "-draft.osm" : "-edited.osm");
       link.click();
       setTimeout(() => URL.revokeObjectURL(url), 1000);
-      savedCursor.value = cursor.value;
+      if (mode !== "draft") savedCursor.value = cursor.value;
+      preflightOpen.value = false;
       error.value = "";
-      message.value = "OSM экспортирован с сохранением отношений и метаданных";
+      message.value =
+        mode === "draft"
+          ? "Черновик сохранён. Ошибки сети остаются и выделены на карте"
+          : "OSM сохранён после проверки связности";
     } catch (cause) {
       error.value = (cause as Error).message;
     }
   }
 
+  function finishArea() {
+    if(!document.value)return;
+    const points=draft.value.map(p=>"nodeId" in p?coordinateOf(document.value!.nodes.get(p.nodeId)!):"wayId" in p?p.coordinate:p);
+    const result=tool.value === "courtyard"?execute({type:"add-courtyard",wayId:courtyardOwner.value,points}):execute({type:"create-building",points,tags:{building:"yes"}});
+    if(result){draft.value=[];tool.value="select";inspectorOpen.value=true;courtyardOwner.value="";}
+  }
   function finishRoad() {
     if (
       execute({
@@ -206,6 +300,10 @@ export const useEditorStore = defineStore("editor", () => {
   }
 
   function selectOsmElement(target: Selection | null) {
+    if (target) {
+      inspectorOpen.value = true;
+      toolsOpen.value = false;
+    }
     selection.value = target;
     selectedVertex.value = target?.type === "node" ? target.id : null;
     selectedLane.value = null;
@@ -225,12 +323,21 @@ export const useEditorStore = defineStore("editor", () => {
     if (!document.value) return;
     const ways = new TrafficModel(document.value).routeWayIds(routeDraft.value);
     if (!ways) {
-      error.value = "Между остановками нет проезда с учётом односторонних дорог";
+      error.value =
+        "Между остановками нет проезда с учётом односторонних дорог";
       return;
     }
-    const patch = execute({ type: "create-bus-route", name: routeName.value, stops: routeDraft.value, ways });
+    const patch = execute({
+      type: "create-bus-route",
+      name: routeName.value,
+      stops: routeDraft.value,
+      ways,
+    });
     if (patch) {
-      selectedBusRoute.value = patch.changes.find((change) => change.type === "relation" && !change.before)?.id ?? "";
+      selectedBusRoute.value =
+        patch.changes.find(
+          (change) => change.type === "relation" && !change.before,
+        )?.id ?? "";
       routeDraft.value = [];
       routeName.value = "";
       tool.value = "select";
@@ -257,8 +364,22 @@ export const useEditorStore = defineStore("editor", () => {
     routeName,
     stops,
     routes,
+    workspaceMode,
+    helpOpen,
+    showGraphIssues,
+    preflightOpen,
+    connectivity,
+    graphIssues,
+    preflight,
+    canExportChecked,
+    inspectorOpen,
+    toolsOpen,
+    zoomRequest,
+    fitRequest,
     trafficRunning,
     trafficSpeed,
+    drivingSide,
+    trafficMetrics,
     selected,
     tool,
     view,
@@ -287,6 +408,7 @@ export const useEditorStore = defineStore("editor", () => {
     redo,
     exportOsm,
     finishRoad,
+    finishArea, courtyardOwner, passageProposal,
     selectOsmElement,
     addRouteStop,
     finishBusRoute,

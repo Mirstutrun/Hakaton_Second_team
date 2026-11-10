@@ -1,6 +1,11 @@
 <script setup lang="ts">
+import BuildingProperties from "./BuildingProperties.vue";
+import { buildingOwner } from "../core/osm/buildingShapes";
+import LaneConnectionsPanel from "./LaneConnectionsPanel.vue";
+import TurnRestrictionsPanel from "./TurnRestrictionsPanel.vue";
 import { computed, reactive, ref, watch } from "vue";
 import { coordinateOf, refsOf, tagsOf } from "../core/osm/model";
+import { laneTagInfo } from "../engine/trafficRules";
 import { roadStyle } from "../engine/geometry/roads";
 import { useEditorStore } from "../stores/editor";
 
@@ -11,37 +16,42 @@ const tags = computed(() => {
   store.revision;
   return store.selected ? tagsOf(store.selected) : {};
 });
-const isRoad = computed(() => store.selection?.type === "way");
+const isArea=computed(()=>{store.revision;if(store.selection?.type === "node")return tags.value.barrier === "block";if(store.selection?.type!=="way"||!store.document)return false;const owner=buildingOwner(store.document,store.selection.id);const t=owner.element?tagsOf(owner.element):{};return !!(t.building&&t.building!=="no"||t["building:part"]&&t["building:part"]!=="no");});
+const isRoad = computed(() => store.selection?.type === "way" && !!tags.value.highway);
 const isSignal = computed(() => tags.value.highway === "traffic_signals");
-const isStop = computed(() => tags.value.public_transport === "stop_position" && tags.value.bus === "yes");
+const isStop = computed(
+  () =>
+    tags.value.public_transport === "stop_position" && tags.value.bus === "yes",
+);
 const nodeRefs = computed(() =>
   store.selected && isRoad.value ? refsOf(store.selected) : [],
 );
 const visualLanes = computed(() => roadStyle(tags.value).lanes);
-const roadLabels: Record<string, string> = {"motorway":"Автомагистраль","trunk":"Скоростная дорога","primary":"Главная дорога","secondary":"Городская магистраль","tertiary":"Районная дорога","residential":"Жилая улица","unclassified":"Обычная дорога","service":"Проезд / парковка","living_street":"Жилая зона","footway":"Пешеходная дорожка","path":"Тропа","cycleway":"Велодорожка","steps":"Лестница","pedestrian":"Пешеходная улица"};
+const roadLabels: Record<string, string> = {
+  motorway: "Автомагистраль",
+  trunk: "Скоростная дорога",
+  primary: "Главная дорога",
+  secondary: "Городская магистраль",
+  tertiary: "Районная дорога",
+  residential: "Жилая улица",
+  unclassified: "Обычная дорога",
+  service: "Проезд / парковка",
+  living_street: "Жилая зона",
+  footway: "Пешеходная дорожка",
+  path: "Тропа",
+  cycleway: "Велодорожка",
+  steps: "Лестница",
+  pedestrian: "Пешеходная улица",
+};
 const laneForm = reactive({ turn: "", change: "", maxspeed: "" });
 const laneInfo = computed(() => {
-  if (!isRoad.value || store.selectedLane === null || !store.selected) return null;
+  if (!isRoad.value || store.selectedLane === null || !store.selected)
+    return null;
   const tag = tags.value;
   const count = roadStyle(tag).lanes;
   const lane = store.selectedLane;
   if (lane < 0 || lane >= count || roadStyle(tag).pedestrian) return null;
-  const oneway = tag.oneway === "yes" || tag.oneway === "-1" ||
-    tag.junction === "roundabout";
-  const backwards = tag.oneway === "-1";
-  if (oneway) {
-    return { index: backwards ? count - lane - 1 : lane, count,
-      suffix: backwards ? ":backward" : "",
-      direction: backwards ? "Против направления way" : "По направлению way" };
-  }
-  const backwardCount = Math.max(1, Number(tag["lanes:backward"]) ||
-    Math.floor(count / 2));
-  const backward = lane < backwardCount;
-  return backward
-    ? { index: backwardCount - lane - 1, count: backwardCount,
-        suffix: ":backward", direction: "Обратное направление" }
-    : { index: lane - backwardCount, count: Math.max(1, count - backwardCount),
-        suffix: ":forward", direction: "Прямое направление" };
+  return laneTagInfo(tag, count, lane, store.drivingSide);
 });
 function laneTagKey(kind: string): string {
   return `${kind}:lanes${laneInfo.value?.suffix || ""}`;
@@ -51,11 +61,20 @@ function laneValue(kind: string): string {
   if (!info) return "";
   return (tags.value[laneTagKey(kind)] ?? "").split("|")[info.index] ?? "";
 }
-watch(() => [store.selectedLane, store.selection, store.revision], () => {
-  laneForm.turn = laneValue("turn");
-  laneForm.change = laneValue("change");
-  laneForm.maxspeed = laneValue("maxspeed");
-}, { immediate: true, deep: true });
+watch(
+  () => [
+    store.selectedLane,
+    store.selection,
+    store.revision,
+    store.drivingSide,
+  ],
+  () => {
+    laneForm.turn = laneValue("turn");
+    laneForm.change = laneValue("change");
+    laneForm.maxspeed = laneValue("maxspeed");
+  },
+  { immediate: true, deep: true },
+);
 function applyLane() {
   const info = laneInfo.value;
   if (!info || !store.selection) return;
@@ -69,9 +88,12 @@ function applyLane() {
     const next = values.join("|");
     updates[key] = values.every((value) => value === "") ? null : next;
   }
-  if (Object.keys(updates).length) store.execute({
-    type: "set-tags", target: store.selection, tags: updates,
-  });
+  if (Object.keys(updates).length)
+    store.execute({
+      type: "set-tags",
+      target: store.selection,
+      tags: updates,
+    });
 }
 const extraKey = ref("");
 const extraValue = ref("");
@@ -82,15 +104,24 @@ function putCustomTag() {
     store.error = "Введите допустимый ключ OSM-тега без пробелов";
     return;
   }
-  if (store.execute({ type: "set-tags", target: store.selection,
-    tags: { [key]: extraValue.value || null } })) {
+  if (
+    store.execute({
+      type: "set-tags",
+      target: store.selection,
+      tags: { [key]: extraValue.value || null },
+    })
+  ) {
     extraKey.value = "";
     extraValue.value = "";
   }
 }
 function deleteCustomTag(key: string) {
   if (!store.selection) return;
-  store.execute({ type: "set-tags", target: store.selection, tags: { [key]: null } });
+  store.execute({
+    type: "set-tags",
+    target: store.selection,
+    tags: { [key]: null },
+  });
 }
 const fields = [
   "name",
@@ -113,7 +144,7 @@ const fields = [
   "traffic_signals:direction",
 ];
 watch(
-  () => [store.selection, store.revision],
+  () => [store.selection, store.revision, store.drivingSide],
   () => {
     for (const key of fields) form[key] = tags.value[key] ?? "";
     confirmDelete.value = false;
@@ -135,14 +166,21 @@ function remove() {
   const patch = store.execute(
     isRoad.value
       ? { type: "delete-way", id: store.selection.id }
-      : { type: isStop.value ? "remove-bus-stop" : "remove-signal", id: store.selection.id },
+      : {
+          type: isStop.value ? "remove-bus-stop" : "remove-signal",
+          id: store.selection.id,
+        },
   );
   if (patch) store.selectOsmElement(null);
   confirmDelete.value = false;
 }
 function smoothSelectedRoad() {
   if (store.selection?.type !== "way") return;
-  if (!window.confirm("Сгладить внутренние повороты OSM-дороги? Общие перекрёстки и светофоры сохранятся. Действие можно отменить Ctrl+Z."))
+  if (
+    !window.confirm(
+      "Сгладить внутренние повороты OSM-дороги? Общие перекрёстки и светофоры сохранятся. Действие можно отменить Ctrl+Z.",
+    )
+  )
     return;
   store.execute({ type: "smooth-road", wayId: store.selection.id, radius: 8 });
 }
@@ -162,9 +200,19 @@ function removeVertex() {
 <template>
   <aside class="properties-panel">
     <div class="inspector-heading">
-      <span class="section-label">НАСТРОЙКИ ОБЪЕКТА</span><span class="tag">КАРТА</span>
+      <span class="section-label">СВОЙСТВА ОБЪЕКТА</span
+      ><button
+        v-if="store.selected"
+        class="clear-selection"
+        @click="store.selectOsmElement(null)"
+        aria-label="Снять выделение"
+      >
+        ×
+      </button>
     </div>
     <template v-if="store.selected">
+      <BuildingProperties v-if="isArea" />
+      <template v-else>
       <h2>
         {{
           isRoad
@@ -173,31 +221,54 @@ function removeVertex() {
               ? "Светофор"
               : isStop
                 ? tags.name || "Автобусная остановка"
-              : "Узел сети"
+                : "Узел сети"
         }}
       </h2>
       <div class="object-id">
-        {{ store.selection?.type === "way" ? "Дорога" : "Узел" }} № {{ store.selection?.id }}
+        {{ store.selection?.type === "way" ? "Дорога" : "Узел" }} №
+        {{ store.selection?.id }}
       </div>
-      <div v-if="isRoad" class="lane-section">
+      <details
+        v-if="isRoad"
+        class="lane-section"
+        :open="store.tool === 'lane' || store.selectedLane !== null"
+      >
+        <summary>Настроить отдельную полосу</summary>
         <div class="section-label">ПОЛОСЫ ДВИЖЕНИЯ</div>
-        <p class="field-hint">Выберите полосу на карте или нажмите её номер. Повороты и ограничения сохраняются отдельно для каждой полосы.</p>
-        <button class="choose-lane-button" type="button"
-          @click="store.tool = 'lane'">
-          Выбрать полосу на карте <span>Л</span>
+        <p class="field-hint">
+          Выберите полосу на карте или нажмите её номер. Повороты и ограничения
+          сохраняются отдельно для каждой полосы.
+        </p>
+        <button
+          class="choose-lane-button"
+          type="button"
+          @click="store.tool = 'lane'"
+        >
+          Выбрать полосу на карте <kbd>L</kbd>
         </button>
         <div class="lane-picker">
-          <button v-for="i in visualLanes" :key="i" type="button"
+          <button
+            v-for="i in visualLanes"
+            :key="i"
+            type="button"
             :title="'Полоса ' + i"
             :class="{ 'lane-active': store.selectedLane === i - 1 }"
-            @click="store.selectedLane = i - 1">
+            @click="store.selectedLane = i - 1"
+          >
             {{ i }}
           </button>
         </div>
+        <LaneConnectionsPanel v-if="laneInfo" />
         <form v-if="laneInfo" class="lane-settings" @submit.prevent="applyLane">
-          <p class="field-hint">Полоса {{ store.selectedLane! + 1 }} · {{ laneInfo.direction }}</p>
-          <label>Разрешённые повороты
-            <select v-model="laneForm.turn" aria-label="Повороты выбранной полосы">
+          <p class="field-hint">
+            Полоса {{ store.selectedLane! + 1 }} · {{ laneInfo.direction }}
+          </p>
+          <label
+            >Разрешённые повороты
+            <select
+              v-model="laneForm.turn"
+              aria-label="Повороты выбранной полосы"
+            >
               <option value="">Не указано</option>
               <option value="left">Налево</option>
               <option value="through">Прямо</option>
@@ -208,8 +279,12 @@ function removeVertex() {
               <option value="none">Без поворотов</option>
             </select>
           </label>
-          <label>Перестроение
-            <select v-model="laneForm.change" aria-label="Перестроение с полосы">
+          <label
+            >Перестроение
+            <select
+              v-model="laneForm.change"
+              aria-label="Перестроение с полосы"
+            >
               <option value="">Не указано</option>
               <option value="yes">Разрешено</option>
               <option value="no">Запрещено</option>
@@ -219,15 +294,18 @@ function removeVertex() {
               <option value="only_right">Только вправо</option>
             </select>
           </label>
-          <label>Ограничение скорости полосы (км/ч)
-            <input v-model="laneForm.maxspeed" aria-label="Скорость выбранной полосы"
-              placeholder="Например, 40" />
+          <label
+            >Ограничение скорости полосы (км/ч)
+            <input
+              v-model="laneForm.maxspeed"
+              aria-label="Скорость выбранной полосы"
+              placeholder="Например, 40"
+            />
           </label>
           <button class="primary full-width">Применить к полосе</button>
         </form>
-        <div class="divider"></div>
-
-      </div>
+      </details>
+      <TurnRestrictionsPanel v-if="isRoad" />
       <form class="properties-form" @submit.prevent="apply">
         <template v-if="isRoad">
           <label
@@ -265,11 +343,28 @@ function removeVertex() {
               >
                 {{ form.highway }}
               </option>
-              <option v-for="value in [
-                  'motorway','trunk','primary','secondary','tertiary','residential',
-                  'unclassified','service','living_street','footway','path',
-                  'cycleway','steps','pedestrian'
-                ]" :key="value" :value="value">{{ roadLabels[value] ?? value }}</option>
+              <option
+                v-for="value in [
+                  'motorway',
+                  'trunk',
+                  'primary',
+                  'secondary',
+                  'tertiary',
+                  'residential',
+                  'unclassified',
+                  'service',
+                  'living_street',
+                  'footway',
+                  'path',
+                  'cycleway',
+                  'steps',
+                  'pedestrian',
+                ]"
+                :key="value"
+                :value="value"
+              >
+                {{ roadLabels[value] ?? value }}
+              </option>
             </select></label
           >
           <div class="field-row">
@@ -288,102 +383,158 @@ function removeVertex() {
                 placeholder="Например, 60"
             /></label>
           </div>
-          <div class="field-row">
-            <label>Ширина, м<input v-model="form.width" aria-label="Ширина дороги" placeholder="Напр. 7.2"/></label>
-            <label>Покрытие<select v-model="form.surface" aria-label="Покрытие">
-  <option value="">Не указано</option><option value="asphalt">Асфальт</option>
-  <option value="concrete">Бетон</option><option value="paving_stones">Плитка</option>
-  <option value="gravel">Щебень</option><option value="dirt">Грунт</option>
-  <option value="ground">Земля</option><option value="sand">Песок</option>
-</select></label>
-          </div>
-          <div class="field-row">
-            <label>Проезд транспорта<select v-model="form.access" aria-label="Доступ">
-  <option value="">Не указано</option><option value="yes">Разрешён</option>
-  <option value="private">Частный проезд</option><option value="no">Запрещён</option>
-  <option value="destination">Только к месту назначения</option>
-  <option value="delivery">Только доставка</option>
-</select></label>
-            <label>Тип перекрёстка<select v-model="form.junction" aria-label="Тип перекрёстка">
-  <option value="">Обычный</option><option value="roundabout">Круговое движение</option>
-  <option value="circular">Круговая развязка</option>
-</select></label>
-          </div>
-          <div class="field-row">
-            <label>Тоннель<select v-model="form.tunnel" aria-label="Тоннель">
-  <option value="">Не указан</option><option value="yes">Да</option>
-  <option value="no">Нет</option>
-</select></label>
-            <label>Тротуар<select v-model="form.sidewalk" aria-label="Тротуар">
-  <option value="">Не указано</option><option value="both">С обеих сторон</option>
-  <option value="left">Слева</option><option value="right">Справа</option>
-  <option value="no">Нет</option>
-</select></label>
-          </div>
-          <div class="field-row">
-            <label>Велодорожка<select v-model="form.cycleway" aria-label="Велодорожка">
-  <option value="">Не указано</option><option value="lane">Полоса на дороге</option>
-  <option value="track">Отдельная дорожка</option><option value="no">Нет</option>
-</select></label>
-            <label>Полосы поворотов<input v-model="form['turn:lanes']" aria-label="Повороты по полосам" placeholder="Налево / прямо / направо"/></label>
-          </div>
-          <p v-if="tags.width" class="field-hint">
-            Ширина задана тегом width={{ tags.width }} м и имеет приоритет над
-            числом полос.
-          </p>
-          <p v-if="!tags.lanes" class="field-hint">
-            На сцене {{ visualLanes }} полосы по умолчанию. Тег в OSM не
-            добавлен.
-          </p>
-          <div class="field-row">
-            <label
-              >Вперёд<input
-                v-model="form['lanes:forward']"
-                aria-label="Полосы вперёд"
-                type="number"
-                min="1"
-                max="20"
-                placeholder="—" /></label
-            ><label
-              >Назад<input
-                v-model="form['lanes:backward']"
-                aria-label="Полосы назад"
-                type="number"
-                min="1"
-                max="20"
-                placeholder="—"
-            /></label>
-          </div>
           <label
-            >Направление<select v-model="form.oneway" aria-label="Направление">
-              <option value="">Не задано</option>
-              <option value="no">Двустороннее</option>
-              <option value="yes">По направлению дороги →</option>
-              <option value="-1">Против направления дороги ←</option>
+            >Направление движения<select
+              v-model="form.oneway"
+              aria-label="Направление"
+            >
+              <option value="">По данным карты</option>
+              <option value="no">В обе стороны</option>
+              <option value="yes">По стрелке дороги →</option>
+              <option value="-1">Против стрелки дороги ←</option>
               <option value="reversible">Реверсивное</option>
               <option value="alternating">Попеременное</option>
             </select></label
           >
-          <div class="field-row">
-            <label>Мост<select v-model="form.bridge" aria-label="Мост">
-  <option value="">Не указан</option><option value="yes">Да</option>
-  <option value="no">Нет</option>
-</select></label><label
-              >Уровень<input
-                v-model="form.layer"
-                aria-label="Уровень"
-                type="number"
-                placeholder="0"
-            /></label>
-          </div>
           <p class="field-hint">
-            Атрибуты применяются ко всему way. Разделение на участки — следующий
-            этап.
+            Изменения применятся к выделенной дороге целиком.
           </p>
+          <details class="road-details">
+            <summary>Покрытие, перекрёстки и ограничения</summary>
+            <div class="field-row">
+              <label
+                >Ширина, м<input
+                  v-model="form.width"
+                  aria-label="Ширина дороги"
+                  placeholder="Напр. 7.2"
+              /></label>
+              <label
+                >Покрытие<select v-model="form.surface" aria-label="Покрытие">
+                  <option value="">Не указано</option>
+                  <option value="asphalt">Асфальт</option>
+                  <option value="concrete">Бетон</option>
+                  <option value="paving_stones">Плитка</option>
+                  <option value="gravel">Щебень</option>
+                  <option value="dirt">Грунт</option>
+                  <option value="ground">Земля</option>
+                  <option value="sand">Песок</option>
+                </select></label
+              >
+            </div>
+            <div class="field-row">
+              <label
+                >Проезд транспорта<select
+                  v-model="form.access"
+                  aria-label="Доступ"
+                >
+                  <option value="">Не указано</option>
+                  <option value="yes">Разрешён</option>
+                  <option value="private">Частный проезд</option>
+                  <option value="no">Запрещён</option>
+                  <option value="destination">Только к месту назначения</option>
+                  <option value="delivery">Только доставка</option>
+                </select></label
+              >
+              <label
+                >Тип перекрёстка<select
+                  v-model="form.junction"
+                  aria-label="Тип перекрёстка"
+                >
+                  <option value="">Обычный</option>
+                  <option value="roundabout">Круговое движение</option>
+                  <option value="circular">Круговая развязка</option>
+                </select></label
+              >
+            </div>
+            <div class="field-row">
+              <label
+                >Тоннель<select v-model="form.tunnel" aria-label="Тоннель">
+                  <option value="">Не указан</option>
+                  <option value="yes">Да</option>
+                  <option value="no">Нет</option>
+                </select></label
+              >
+              <label
+                >Тротуар<select v-model="form.sidewalk" aria-label="Тротуар">
+                  <option value="">Не указано</option>
+                  <option value="both">С обеих сторон</option>
+                  <option value="left">Слева</option>
+                  <option value="right">Справа</option>
+                  <option value="no">Нет</option>
+                </select></label
+              >
+            </div>
+            <div class="field-row">
+              <label
+                >Велодорожка<select
+                  v-model="form.cycleway"
+                  aria-label="Велодорожка"
+                >
+                  <option value="">Не указано</option>
+                  <option value="lane">Полоса на дороге</option>
+                  <option value="track">Отдельная дорожка</option>
+                  <option value="no">Нет</option>
+                </select></label
+              >
+              <label
+                >Полосы поворотов<input
+                  v-model="form['turn:lanes']"
+                  aria-label="Повороты по полосам"
+                  placeholder="Налево / прямо / направо"
+              /></label>
+            </div>
+            <p v-if="tags.width" class="field-hint">
+              Ширина задана тегом width={{ tags.width }} м и имеет приоритет над
+              числом полос.
+            </p>
+            <p v-if="!tags.lanes" class="field-hint">
+              На сцене {{ visualLanes }} полосы по умолчанию. Тег в OSM не
+              добавлен.
+            </p>
+            <div class="field-row">
+              <label
+                >Вперёд<input
+                  v-model="form['lanes:forward']"
+                  aria-label="Полосы вперёд"
+                  type="number"
+                  min="1"
+                  max="20"
+                  placeholder="—" /></label
+              ><label
+                >Назад<input
+                  v-model="form['lanes:backward']"
+                  aria-label="Полосы назад"
+                  type="number"
+                  min="1"
+                  max="20"
+                  placeholder="—"
+              /></label>
+            </div>
+            <div class="field-row">
+              <label
+                >Мост<select v-model="form.bridge" aria-label="Мост">
+                  <option value="">Не указан</option>
+                  <option value="yes">Да</option>
+                  <option value="no">Нет</option>
+                </select></label
+              ><label
+                >Уровень<input
+                  v-model="form.layer"
+                  aria-label="Уровень"
+                  type="number"
+                  placeholder="0"
+              /></label>
+            </div>
+          </details>
         </template>
         <template v-else>
-          <label v-if="isStop">Название остановки
-            <input v-model="form.name" aria-label="Название остановки" placeholder="Например, Центральная" />
+          <label v-if="isStop"
+            >Название остановки
+            <input
+              v-model="form.name"
+              aria-label="Название остановки"
+              placeholder="Например, Центральная"
+            />
           </label>
           <label v-if="isSignal"
             >Направление светофора<select
@@ -401,8 +552,8 @@ function removeVertex() {
             }}° E
           </div>
           <p class="field-hint">
-            Для переноса включите «Геометрия» и перетащите маркер. Если узел
-            общий, изменятся все связанные дороги.
+            Для переноса включите «Переместить узел» и перетащите маркер. Если
+            узел общий, изменятся все связанные дороги.
           </p>
         </template>
         <button
@@ -413,7 +564,8 @@ function removeVertex() {
           Применить изменения
         </button>
       </form>
-      <template v-if="isRoad">
+      <details v-if="isRoad" class="geometry-details">
+        <summary>Геометрия дороги</summary>
         <div class="divider"></div>
         <div class="section-label">
           ГЕОМЕТРИЯ · {{ nodeRefs.length }} ВЕРШИН
@@ -439,14 +591,20 @@ function removeVertex() {
         >
           Удалить вершину из дороги
         </button>
-      </template>
+      </details>
       <div v-if="isRoad || isSignal || isStop" class="delete-section">
         <button
           v-if="!confirmDelete"
           class="danger full-width"
           @click="confirmDelete = true"
         >
-          {{ isRoad ? "Удалить дорогу" : isStop ? "Убрать остановку" : "Удалить светофор" }}
+          {{
+            isRoad
+              ? "Удалить дорогу"
+              : isStop
+                ? "Убрать остановку"
+                : "Удалить светофор"
+          }}
         </button>
         <div v-else class="confirm-delete">
           <p>
@@ -455,7 +613,7 @@ function removeVertex() {
                 ? "Удалить эту дорогу? Общие узлы останутся на карте."
                 : isStop
                   ? "Убрать остановку? Узел дороги останется."
-                : "Убрать светофор? Узел дороги останется."
+                  : "Убрать светофор? Узел дороги останется."
             }}
           </p>
           <button class="danger" @click="remove">Подтвердить удаление</button
@@ -463,27 +621,62 @@ function removeVertex() {
         </div>
       </div>
       <details class="advanced-tags">
-        <summary>Дополнительные свойства дороги · {{ Object.keys(tags).length }}</summary>
-        <p class="field-hint">Для опытных пользователей. Можно изменять дополнительные свойства карты.</p>
+        <summary>
+          Дополнительные свойства дороги · {{ Object.keys(tags).length }}
+        </summary>
+        <p class="field-hint">
+          Для опытных пользователей. Можно изменять дополнительные свойства
+          карты.
+        </p>
         <div class="advanced-tag-entry">
-          <input v-model="extraKey" aria-label="Ключ OSM-тега" placeholder="ключ (например, maxheight)" />
-          <input v-model="extraValue" aria-label="Значение OSM-тега" placeholder="значение" />
+          <input
+            v-model="extraKey"
+            aria-label="Ключ OSM-тега"
+            placeholder="ключ (например, maxheight)"
+          />
+          <input
+            v-model="extraValue"
+            aria-label="Значение OSM-тега"
+            placeholder="значение"
+          />
           <button type="button" @click="putCustomTag">Сохранить</button>
         </div>
         <div v-for="(value, key) in tags" :key="key" class="advanced-tag-row">
           <code>{{ key }}</code>
           <span>{{ value }}</span>
-          <button type="button" :aria-label="'Изменить тег ' + key"
-            @click="extraKey = String(key); extraValue = String(value)">✎</button>
-          <button type="button" :aria-label="'Удалить тег ' + key"
-            @click="deleteCustomTag(String(key))">×</button>
+          <button
+            type="button"
+            :aria-label="'Изменить тег ' + key"
+            @click="
+              extraKey = String(key);
+              extraValue = String(value);
+            "
+          >
+            ✎
+          </button>
+          <button
+            type="button"
+            :aria-label="'Удалить тег ' + key"
+            @click="deleteCustomTag(String(key))"
+          >
+            ×
+          </button>
         </div>
       </details>
+      </template>
     </template>
     <div v-else class="empty-inspector">
       <div class="empty-icon">⌖</div>
-      <h2>Объект не выбран</h2>
-      <p>Выберите дорогу, узел или светофор.</p>
+      <h2>Выберите дорогу на карте</h2>
+      <p>Её полосы, скорость и направление появятся здесь.</p>
+      <ol class="inspector-steps">
+        <li>Нажмите на дорогу</li>
+        <li>Измените нужное поле</li>
+        <li>Нажмите «Применить изменения»</li>
+      </ol>
+      <button class="full-width" @click="store.helpOpen = true">
+        Показать быстрый старт
+      </button>
       <span class="key-hint"><kbd>V</kbd> Выбор объекта</span>
     </div>
     <div class="validation">
@@ -506,7 +699,6 @@ function removeVertex() {
           {{ issue.message }}
         </p>
       </details>
-
     </div>
   </aside>
 </template>

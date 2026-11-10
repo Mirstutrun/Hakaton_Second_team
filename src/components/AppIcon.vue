@@ -1,6 +1,9 @@
 <script setup lang="ts">
 defineProps<{ name: string }>();
 const paths: Record<string, string> = {
+  building:"M4 21V4h16v17M2 21h20M8 8h2m4 0h2M8 12h2m4 0h2M10 21v-5h4v5",
+  courtyard:"M3 3h18v18H3zM8 8h8v8H8z",
+  block:"M4 8l8-5 8 5v10l-8 4-8-4zM4 8l8 5 8-5M12 13v9",
   select: "M5 3l14 9-7 1-3 7z",
   lane: "M3 19L8 4M21 19L16 4M12 6v3m0 4v3m0 3v1",
   car: "M5 16H3v-5l2-2 2-5h10l2 5 2 2v5h-2M5 16h14M5 16v3m14-3v3M5 9h14M7 13h2m6 0h2",

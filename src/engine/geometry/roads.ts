@@ -6,6 +6,11 @@ import {
   type Scene,
   type Material,
 } from "@babylonjs/core";
+import {
+  drivingLanes,
+  oneWayDirection,
+  type DrivingSide,
+} from "../trafficRules";
 import type { Tags } from "../../core/osm/model";
 
 export const pedestrianTypes = new Set([
@@ -21,22 +26,22 @@ export function roadStyle(tags: Tags) {
   const pedestrian = pedestrianTypes.has(tags.highway);
   const lanes =
     Number(tags.lanes) ||
-    (pedestrian ||
-    tags.oneway === "yes" ||
-    tags.oneway === "-1" ||
-    tags.highway === "service"
+    (Number(tags["lanes:forward"]) || 0) +
+      (Number(tags["lanes:backward"]) || 0) +
+      (Number(tags["lanes:both_ways"]) || 0) ||
+    (pedestrian || oneWayDirection(tags) !== 0 || tags.highway === "service"
       ? 1
       : 2);
   const explicitWidth = Number.parseFloat(tags.width);
   return {
     pedestrian,
-    lanes: Math.min(20, Math.max(1, lanes)),
+    lanes: Math.min(20, Math.max(1, Math.floor(lanes))),
     width:
       Number.isFinite(explicitWidth) && explicitWidth > 0
         ? explicitWidth
         : pedestrian
           ? 2.2
-          : Math.min(20, Math.max(1, lanes)) * 3.4,
+          : Math.min(20, Math.max(1, Math.floor(lanes))) * 3.4,
     elevation:
       0.18 +
       (Number(tags.layer) ||
@@ -45,13 +50,14 @@ export function roadStyle(tags: Tags) {
   };
 }
 
-
 /**
  * Purely visual rounding: the underlying OSM nodes and exported XML are
  * untouched. Trim is capped so a short segment is never over-smoothed.
  */
 export function smoothRoadPoints(
-  points: Vector3[], radius = 8, protectedIndices?: ReadonlySet<number>,
+  points: Vector3[],
+  radius = 8,
+  protectedIndices?: ReadonlySet<number>,
 ): Vector3[] {
   if (points.length < 3 || radius <= 0) return points.map((p) => p.clone());
   const result: Vector3[] = [points[0].clone()];
@@ -60,14 +66,19 @@ export function smoothRoadPoints(
       result.push(points[i].clone());
       continue;
     }
-    const prev = points[i - 1], current = points[i], next = points[i + 1];
-    const into = current.subtract(prev), out = next.subtract(current);
-    const inLen = into.length(), outLen = out.length();
+    const prev = points[i - 1],
+      current = points[i],
+      next = points[i + 1];
+    const into = current.subtract(prev),
+      out = next.subtract(current);
+    const inLen = into.length(),
+      outLen = out.length();
     if (inLen < 0.05 || outLen < 0.05) {
       result.push(current.clone());
       continue;
     }
-    const a = into.scale(1 / inLen), b = out.scale(1 / outLen);
+    const a = into.scale(1 / inLen),
+      b = out.scale(1 / outLen);
     const dot = Math.max(-1, Math.min(1, Vector3.Dot(a, b)));
     if (dot > 0.998 || dot < -0.98) {
       result.push(current.clone());
@@ -80,12 +91,15 @@ export function smoothRoadPoints(
     for (let step = 0; step <= 6; step++) {
       const t = step / 6;
       const s = 1 - t;
-      const p = p0.scale(s * s)
+      const p = p0
+        .scale(s * s)
         .add(current.scale(2 * s * t))
         .add(p2.scale(t * t));
-      if (result.length === 0 || Vector3.DistanceSquared(
-        result[result.length - 1], p,
-      ) > 0.00001) result.push(p);
+      if (
+        result.length === 0 ||
+        Vector3.DistanceSquared(result[result.length - 1], p) > 0.00001
+      )
+        result.push(p);
     }
   }
   result.push(points[points.length - 1].clone());
@@ -93,10 +107,13 @@ export function smoothRoadPoints(
 }
 
 export function laneCenterline(
-  points: Vector3[], width: number, count: number, lane: number,
+  points: Vector3[],
+  width: number,
+  count: number,
+  lane: number,
 ): Vector3[] {
   if (points.length < 2) return [];
-  const offset = -width / 2 + (lane + 0.5) * width / count;
+  const offset = -width / 2 + ((lane + 0.5) * width) / count;
   return points.map((point, index) => {
     const previous = points[Math.max(index - 1, 0)];
     const next = points[Math.min(index + 1, points.length - 1)];
@@ -104,23 +121,41 @@ export function laneCenterline(
     direction.y = 0;
     if (direction.lengthSquared() < 0.00001) return point.clone();
     direction.normalize();
-    return point.add(new Vector3(-direction.z * offset, 0, direction.x * offset));
+    return point.add(
+      new Vector3(-direction.z * offset, 0, direction.x * offset),
+    );
   });
 }
 
 export function selectedLaneMesh(
-  wayId: string, original: Vector3[], tags: Tags, lane: number,
-  scene: Scene, material: Material,
+  wayId: string,
+  original: Vector3[],
+  tags: Tags,
+  lane: number,
+  scene: Scene,
+  material: Material,
   protectedIndices?: ReadonlySet<number>,
 ): Mesh | null {
   const style = roadStyle(tags);
-  if (style.pedestrian || lane < 0 || lane >= style.lanes ||
-      original.length < 2) return null;
-  const path = smoothRoadPoints(original.map((p) =>
-    new Vector3(p.x, style.elevation + 0.12, p.z)), 8, protectedIndices);
+  if (
+    style.pedestrian ||
+    lane < 0 ||
+    lane >= style.lanes ||
+    original.length < 2
+  )
+    return null;
+  const path = smoothRoadPoints(
+    original.map((p) => new Vector3(p.x, style.elevation + 0.12, p.z)),
+    8,
+    protectedIndices,
+  );
   const centerline = laneCenterline(path, style.width, style.lanes, lane);
-  const mesh = ribbon(`lane:${wayId}:${lane}`,
-    centerline, Math.max(0.6, style.width / style.lanes - 0.25), scene);
+  const mesh = ribbon(
+    `lane:${wayId}:${lane}`,
+    centerline,
+    Math.max(0.6, style.width / style.lanes - 0.25),
+    scene,
+  );
   mesh.material = material;
   mesh.isPickable = false;
   mesh.metadata = { role: "lane-highlight", type: "way", id: wayId, lane };
@@ -173,16 +208,34 @@ export function buildRoad(
   material: Material,
   lineMaterial: Material,
   protectedIndices?: ReadonlySet<number>,
+  side: DrivingSide = "left",
 ): Mesh[] {
   if (points.length < 2) return [];
   const style = roadStyle(tags);
-  const path = smoothRoadPoints(points.map(
-    (point) => new Vector3(point.x, style.elevation, point.z),
-  ), 8, protectedIndices);
+  const layout = drivingLanes(tags, style.lanes, side);
+  const dividingLane =
+    side === "left"
+      ? Math.min(...layout.forward)
+      : Math.max(...layout.forward) + 1;
+  const path = smoothRoadPoints(
+    points.map((point) => new Vector3(point.x, style.elevation, point.z)),
+    8,
+    protectedIndices,
+  );
   const road = ribbon(`way:${id}`, path, style.width, scene);
   road.material = material;
   road.metadata = { type: "way", id, role: "road", width: style.width };
-  const result = [road];
+  const edgePath = path.map((p) => new Vector3(p.x, p.y - 0.025, p.z));
+  const shoulder = ribbon(
+    `shoulder:${id}`,
+    edgePath,
+    style.width + (style.pedestrian ? 0.15 : 0.65),
+    scene,
+  );
+  shoulder.material = lineMaterial;
+  shoulder.isPickable = false;
+  shoulder.metadata = { role: "shoulder" };
+  const result = [shoulder, road];
   if (!style.pedestrian) {
     const lines: Vector3[][] = [];
     for (let i = 1; i < path.length; i++) {
@@ -201,6 +254,10 @@ export function buildRoad(
           .scale(-style.width / 2 + (lane * style.width) / style.lanes)
           .add(new Vector3(0, 0.07, 0));
         const length = Vector3.Distance(a, b);
+        if (oneWayDirection(tags) === 0 && lane === dividingLane) {
+          lines.push([a.add(offset), b.add(offset)]);
+          continue;
+        }
         for (let distance = 0; distance < length; distance += 9) {
           lines.push([
             a.add(direction.scale(distance)).add(offset),
@@ -215,18 +272,15 @@ export function buildRoad(
         { lines },
         scene,
       );
-      markings.color.set(0.65, 0.74, 0.7);
+      markings.color.set(0.91, 0.93, 0.87);
       markings.isPickable = false;
       markings.metadata = { role: "markings" };
       result.push(markings);
     }
-    if (tags.oneway === "yes" || tags.oneway === "-1") {
+    if (oneWayDirection(tags) !== 0) {
       const a = path[0],
         b = path[1];
-      const direction = b
-        .subtract(a)
-        .normalize()
-        .scale(tags.oneway === "-1" ? -1 : 1);
+      const direction = b.subtract(a).normalize().scale(oneWayDirection(tags));
       const center = Vector3.Center(a, b).add(new Vector3(0, 0.1, 0));
       const side = new Vector3(-direction.z, 0, direction.x);
       const arrow = MeshBuilder.CreateLines(
@@ -240,9 +294,9 @@ export function buildRoad(
         },
         scene,
       );
-      arrow.color.set(0.7, 0.88, 0.8);
+      arrow.color.set(0.95, 0.95, 0.86);
       arrow.isPickable = false;
-      arrow.material = lineMaterial;
+      arrow.metadata = { role: "markings" };
       result.push(arrow);
     }
   }

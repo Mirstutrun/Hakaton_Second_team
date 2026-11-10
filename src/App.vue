@@ -1,14 +1,70 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from "vue";
+import {
+  computed,
+  onBeforeUnmount,
+  onMounted,
+  ref,
+  watch,
+  nextTick,
+} from "vue";
 import AppIcon from "./components/AppIcon.vue";
 import EditorToolbar from "./components/EditorToolbar.vue";
 import MapViewport from "./components/MapViewport.vue";
+import QualityDock from "./components/QualityDock.vue";
 import PropertiesPanel from "./components/PropertiesPanel.vue";
 import { useEditorStore } from "./stores/editor";
 import { editorTools } from "./editor/tools";
 
 const store = useEditorStore();
 const input = ref<HTMLInputElement>();
+let helpTrigger: HTMLElement | null = null;
+watch(
+  () => store.helpOpen,
+  async (open) => {
+    if (open) {
+      helpTrigger = document.activeElement as HTMLElement;
+      await nextTick();
+      document.querySelector<HTMLButtonElement>(".close-help")?.focus();
+    } else helpTrigger?.focus();
+  },
+);
+const modes = [
+  {
+    id: "edit",
+    title: "Редактирование",
+    step: "01",
+    detail: "Дороги и свойства",
+  },
+  {
+    id: "traffic",
+    title: "Транспорт",
+    step: "02",
+    detail: "Машины и маршруты",
+  },
+  { id: "review", title: "Проверка", step: "03", detail: "Ошибки и экспорт" },
+] as const;
+watch(
+  () => store.tool,
+  (tool) => {
+    if (["car", "bus-stop", "bus-route"].includes(tool))
+      store.workspaceMode = "traffic";
+  },
+);
+watch(
+  () => store.workspaceMode,
+  (mode) => {
+    store.trafficRunning = mode === "traffic";
+  },
+);
+function switchMode(mode: "edit" | "traffic" | "review") {
+  store.tool = "select";
+  store.draft = [];
+  store.routeDraft = [];
+  store.joinSource = null;
+  store.selectedLane = null;
+  store.workspaceMode = mode;
+  store.inspectorOpen = mode === "review";
+}
 const hint = computed(
   () => editorTools.find((tool) => tool.id === store.tool)?.hint,
 );
@@ -48,6 +104,34 @@ async function importFile(event: Event) {
   }
 }
 function keyboard(event: KeyboardEvent) {
+  if (store.preflightOpen) {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      store.preflightOpen = false;
+    }
+    return;
+  }
+  if (store.helpOpen) {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      store.helpOpen = false;
+    }
+    if (event.key === "Tab") {
+      const controls = Array.from(
+        document.querySelectorAll<HTMLButtonElement>(".help-dialog button"),
+      );
+      const first = controls[0],
+        last = controls[controls.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last?.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first?.focus();
+      }
+    }
+    return;
+  }
   if (
     (event.target as HTMLElement).closest(
       "input,select,textarea,[contenteditable]",
@@ -102,10 +186,9 @@ function keyboard(event: KeyboardEvent) {
     store.tool = "select";
   }
   if (event.key === "Enter" && store.tool === "draw") store.finishRoad();
+  if(event.key === "Enter" && ["building","courtyard"].includes(store.tool))store.finishArea();
   if (key === "f") store.focusRequest++;
-  const tool = editorTools.find(
-    (tool) => tool.key.toLowerCase() === key,
-  );
+  const tool = editorTools.find((tool) => tool.key.toLowerCase() === key);
   if (tool) {
     store.tool = tool.id;
     store.draft = [];
@@ -179,8 +262,215 @@ onBeforeUnmount(() => {
         />
       </div>
     </header>
-    <div class="workspace">
-      <EditorToolbar /><MapViewport /><PropertiesPanel />
+    <nav class="modebar" aria-label="Режим работы">
+      <div class="mode-tabs">
+        <button
+          v-for="mode in modes"
+          :key="mode.id"
+          :class="{ active: store.workspaceMode === mode.id }"
+          :aria-label="mode.title"
+          :aria-pressed="store.workspaceMode === mode.id"
+          @click="switchMode(mode.id)"
+        >
+          <span class="mode-number">{{ mode.step }}</span
+          ><span
+            >{{ mode.title }}<small>{{ mode.detail }}</small></span
+          >
+        </button>
+      </div>
+      <button
+        class="issue-toggle"
+        :aria-pressed="store.showGraphIssues"
+        @click="store.showGraphIssues = !store.showGraphIssues"
+      >
+        {{ store.showGraphIssues ? "Скрыть ошибки" : "Выделить ошибки" }} ·
+        {{ store.graphIssues.length }}
+      </button>
+      <button
+        class="help-button"
+        @click="store.helpOpen = !store.helpOpen"
+        :aria-expanded="store.helpOpen"
+      >
+        ? Как работать
+      </button>
+    </nav>
+    <div
+      :class="[
+        'workspace',
+        {
+          'inspector-open': store.inspectorOpen,
+          'tools-open': store.toolsOpen,
+        },
+      ]"
+    >
+      <EditorToolbar /><MapViewport />
+      <aside v-if="store.workspaceMode === 'review'" class="review-sidebar">
+        <span class="section-label">ПЕРЕД СОХРАНЕНИЕМ</span>
+        <h2>Проверка сети</h2>
+        <p>
+          Начните с разрывов и пересечений. Каждую правку сверяйте с реальной
+          картой.
+        </p>
+        <QualityDock />
+        <button
+          class="primary full-width"
+          :disabled="!store.document"
+          @click="store.exportOsm()"
+        >
+          Сохранить проверяемый OSM
+        </button>
+      </aside>
+      <PropertiesPanel v-else />
+    </div>
+    <div
+      v-if="store.preflightOpen"
+      class="help-backdrop"
+      @click.self="store.preflightOpen = false"
+    >
+      <section
+        class="help-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Проверка перед сохранением"
+      >
+        <button
+          class="close-help"
+          aria-label="Закрыть проверку сохранения"
+          @click="store.preflightOpen = false"
+        >
+          ×
+        </button>
+        <span class="section-label">ПРОВЕРКА ПЕРЕД СОХРАНЕНИЕМ</span>
+        <h2>
+          {{
+            store.canExportChecked
+              ? "Проверьте направления проезда"
+              : "В графе есть проблемы"
+          }}
+        </h2>
+        <div class="preflight-metrics">
+          <span
+            ><b>{{ store.preflight.components }}</b> частей сети</span
+          ><span
+            ><b>{{ store.preflight.conflicts.length }}</b> конфликтов
+            геометрии</span
+          ><span
+            ><b>{{ store.preflight.errors.length }}</b> ошибок файла</span
+          >
+        </div>
+        <p v-if="store.preflight.components > 1">
+          Дорожная сеть состоит из отдельных частей. Между ними нет общего
+          дорожного узла. Соедините нужные участки или сохраните рабочий
+          черновик.
+        </p>
+        <p v-if="store.preflight.directedComponents > 1">
+          С учётом односторонних дорог обнаружено
+          {{ store.preflight.directedComponents }} групп взаимной достижимости.
+          На границах выгрузки это возможно, но направления нужно проверить.
+        </p>
+        <ul class="preflight-list">
+          <li
+            v-for="(issue, index) in [
+              ...store.preflight.errors,
+              ...store.preflight.conflicts,
+            ].slice(0, 8)"
+            :key="index"
+          >
+            {{ issue.message }}
+          </li>
+        </ul>
+        <p>
+          Проверка относится к данным OSM. Она не заменяет сверку с реальной
+          картой и прогон серверных симуляторов.
+        </p>
+        <button
+          class="primary full-width"
+          @click="
+            store.preflightOpen = false;
+            store.workspaceMode = 'review';
+            store.showGraphIssues = true;
+            store.inspectorOpen = true;
+          "
+        >
+          Показать проблемы на карте
+        </button>
+        <button
+          v-if="store.canExportChecked"
+          class="full-width"
+          @click="store.exportOsm('confirm')"
+        >
+          Направления проверены — сохранить OSM
+        </button>
+        <button
+          class="full-width"
+          :disabled="!!store.preflight.errors.length"
+          @click="store.exportOsm('draft')"
+        >
+          Сохранить рабочий черновик с предупреждениями
+        </button>
+      </section>
+    </div>
+    <div
+      v-if="store.helpOpen"
+      class="help-backdrop"
+      @click.self="store.helpOpen = false"
+    >
+      <section
+        class="help-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Как работать"
+        @keydown.esc="store.helpOpen = false"
+      >
+        <button
+          class="close-help"
+          aria-label="Закрыть подсказки"
+          @click="store.helpOpen = false"
+        >
+          ×
+        </button>
+        <span class="section-label">БЫСТРЫЙ СТАРТ</span>
+        <h2>От карты до готового файла</h2>
+        <ol class="help-steps">
+          <li>
+            <b>Откройте карту</b>
+            <p>Загрузите свой .osm или начните с примера Иркутска.</p>
+          </li>
+          <li>
+            <b>Выберите дорогу</b>
+            <p>
+              Нажмите на неё. Справа измените полосы, направление или скорость и
+              нажмите «Применить изменения».
+            </p>
+          </li>
+          <li>
+            <b>Проверьте результат</b>
+            <p>
+              В «Транспорте» добавьте машины. В «Проверке» найдите разрывы и
+              проверьте выделенные проблемы перед сохранением.
+            </p>
+          </li>
+          <li>
+            <b>Сохраните OSM</b>
+            <p>
+              Скачайте карту и отправьте её на сервер организатора для проверки
+              в трёх симуляторах.
+            </p>
+          </li>
+        </ol>
+        <div class="shortcut-grid">
+          <span><kbd>V</kbd> Выбор</span><span><kbd>F</kbd> К объекту</span
+          ><span><kbd>Esc</kbd> Отмена инструмента</span
+          ><span><kbd>Ctrl Z</kbd> Отменить правку</span>
+        </div>
+        <p>
+          Правая кнопка мыши — перемещение карты. Колесо — масштаб. В 3D левая
+          кнопка на свободном месте — поворот.
+        </p>
+        <button class="primary full-width" @click="store.helpOpen = false">
+          Понятно, начать работу
+        </button>
+      </section>
     </div>
     <div v-if="store.error" class="error-toast" role="alert">
       <span>{{ store.error }}</span
