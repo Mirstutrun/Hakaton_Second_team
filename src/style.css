@@ -1863,3 +1863,7 @@ button.primary,
     font-size: 9px;
   }
 }
+/* Preserve the canvas column when the mobile tool panel is hidden. */
+.viewport {
+  grid-column: 2;
+}
