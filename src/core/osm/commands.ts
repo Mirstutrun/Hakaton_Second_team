@@ -1,4 +1,5 @@
-import { buildingShapes, buildingOwner, shapeContains, segmentCrossing } from "./buildingShapes";
+import { assertBuildingsReadOnly } from "./buildingProtection";
+import { buildingShapes, shapeContains, segmentCrossing } from "./buildingShapes";
 import { formatConnectivity, parseConnectivity } from "./laneConnectivity";
 import { drivingLanes, laneTagInfo, type DrivingSide } from "../../engine/trafficRules";
 import { pedestrianTypes, roadStyle } from "../../engine/geometry/roads";
@@ -374,13 +375,8 @@ export function applyEdit(
 
   try {
     switch (command.type) {
-      case "delete-building": {
-        const owner=buildingOwner(document,command.wayId),shapes=buildingShapes(document).filter(s=>s.id===owner.id);if(!shapes.length)throw Error("Выберите здание");
-        const ways=[...new Set(shapes.flatMap(s=>s.wayIds))];
-        if([...document.relations].some(([id,r])=>(owner.type!=="relation"||id!==owner.id)&&childElements(r).some(m=>(m.getAttribute("type")==="way"&&ways.includes(m.getAttribute("ref")!)||owner.type==="relation"&&m.getAttribute("type")==="relation"&&m.getAttribute("ref")===owner.id))))throw Error("Контур используется в другом OSM-отношении. Удаление заблокировано");
-        if(owner.type==="relation"){touch("relation",owner.id);owner.element.remove();document.relations.delete(owner.id);}
-        for(const id of ways){touch("way",id);document.ways.get(id)?.remove();document.ways.delete(id);}break;
-      }
+      case "delete-building":
+        throw new Error("Здания доступны только для просмотра");
       case "mark-building-passage": {
         // Габариты арки не задаются: в OSM записывается только сам проезд.
         const source=requireElement(document,"way",command.wayId),tags=tagsOf(source);if(!tags.highway)throw Error("Выберите дорогу через здание");
@@ -1192,6 +1188,7 @@ export function applyEdit(
           .get(change.id)
           ?.cloneNode(true) as Element) ?? null,
     }));
+    assertBuildingsReadOnly(document, patch);
     assertRoadEditSafe(document, patch);
     return patch;
   } catch (error) {

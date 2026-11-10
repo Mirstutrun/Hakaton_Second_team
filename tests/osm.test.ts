@@ -94,29 +94,6 @@ describe("OSM data integrity", () => {
       validateOsm(document).filter((issue) => issue.severity === "error"),
     ).toHaveLength(0);
   });
-  it("deletes an existing building with undo", () => {
-    // Здание в стороне от дороги: редактор умеет только удалить его.
-    // (Отмена удаления возвращает объект в конец своей группы, поэтому здание — последний way.)
-    const withBuilding = fixture
-      .replace(
-        '<way id="10"',
-        '<node id="5" lat="52.5" lon="104.5"/><node id="6" lat="52.5" lon="104.5003"/><node id="7" lat="52.5002" lon="104.5003"/><node id="8" lat="52.5002" lon="104.5"/><way id="10"',
-      )
-      .replace(
-        "<relation",
-        '<way id="11"><nd ref="5"/><nd ref="6"/><nd ref="7"/><nd ref="8"/><nd ref="5"/><tag k="building" v="yes"/></way><relation',
-      );
-    const document = parseOsm(withBuilding);
-    const removal = applyEdit(document, { type: "delete-building", wayId: "11" });
-    expect(document.ways.has("11")).toBe(false);
-    expect(serializeOsm(parseOsm(serializeOsm(document)))).not.toContain('k="building"');
-    applyPatch(document, removal, "before");
-    expect(document.ways.has("11")).toBe(true);
-    expect(serializeOsm(document)).toBe(withBuilding);
-    // Дорога — не здание: команда её не трогает.
-    expect(() => applyEdit(document, { type: "delete-building", wayId: "10" })).toThrow("Выберите здание");
-    expect(document.ways.size).toBe(2);
-  });
   it("removes vertices and rejects removal of a junction", () => {
     const document = parseOsm(fixture);
     applyEdit(document, {
