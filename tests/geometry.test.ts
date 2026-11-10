@@ -273,8 +273,7 @@ it("building roofs face up and facade colours stay within one mesh", async () =>
     expect(mesh.getVerticesData(VertexBuffer.ColorKind)).toHaveLength(
       mesh.getTotalVertices() * 4,
     );
-    // Здания выбираются кликом для редактирования (BuildingProperties).
-    expect(mesh.isPickable).toBe(true);
+    expect(mesh.isPickable).toBe(false);
     expect(mesh.metadata.role).toBe("building");
   }
   scene.dispose();

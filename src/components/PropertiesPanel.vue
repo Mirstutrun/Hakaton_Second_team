@@ -1,9 +1,7 @@
 <script setup lang="ts">
-import BuildingProperties from "./BuildingProperties.vue";
 import LaneConnectionsPanel from "./LaneConnectionsPanel.vue";
 import { computed, ref, watch } from "vue";
 import { refsOf, tagsOf } from "../core/osm/model";
-import { buildingOwner } from "../core/osm/buildingShapes";
 import {
   laneDirections,
   laneDirectionTags,
@@ -19,16 +17,6 @@ const confirmDelete = ref(false);
 const tags = computed(() => {
   store.revision;
   return store.selected ? tagsOf(store.selected) : {};
-});
-const isBuilding = computed(() => {
-  store.revision;
-  if (store.selection?.type !== "way" || !store.document) return false;
-  const owner = buildingOwner(store.document, store.selection.id);
-  const t = owner.element ? tagsOf(owner.element) : {};
-  return !!(
-    (t.building && t.building !== "no") ||
-    (t["building:part"] && t["building:part"] !== "no")
-  );
 });
 const isRoad = computed(
   () => store.selection?.type === "way" && !!tags.value.highway,
@@ -169,8 +157,7 @@ function removeVertex() {
       </button>
     </div>
     <template v-if="store.selected">
-      <BuildingProperties v-if="isBuilding" />
-      <template v-else-if="isRoad">
+      <template v-if="isRoad">
         <h2>{{ tags.name || "Дорога без названия" }}</h2>
         <div class="object-id">Дорога № {{ store.selection?.id }}</div>
         <section v-if="selectedIssues.length" class="issue-notice" role="alert">

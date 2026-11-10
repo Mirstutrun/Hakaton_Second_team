@@ -683,7 +683,6 @@ export class SceneManager {
     this.handles = [];
     if (!this.document) return;
     const selected = this.store.selection;
-    for(const mesh of this.buildingMeshes)mesh.material=selected?.type === "way"&&mesh.metadata.wayIds?.includes(selected.id)?this.materials.selected:this.materials.building;
     const problemWays = new Map(
       this.store.problems
         .filter((i) => i.elementType === "way" && i.id)
@@ -1268,7 +1267,7 @@ export class SceneManager {
             : traffic
               // В «Транспорте» объекты карты не выбираются: только машины и остановки.
               ? ["vehicle", "stop"].includes(mesh.metadata?.role)
-              : ["road", "handle", "issue", "building"].includes(mesh.metadata?.role),
+              : ["road", "handle", "issue"].includes(mesh.metadata?.role),
     );
     const metadata = pick?.pickedMesh?.metadata;
     if (tool === "car") {

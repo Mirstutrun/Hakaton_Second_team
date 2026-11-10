@@ -29,7 +29,6 @@ import type {
 export type BusStopSide = "left" | "right";
 
 export type EditCommand =
- | {type:"delete-building";wayId:string}
  | {type:"mark-building-passage";wayId:string;buildingId:string}
  | {type:"connect-lanes";fromWay:string;toWay:string;via:string;fromNode:string;toNode:string;fromLane:number;toLane:number;drivingSide:DrivingSide}
  | {type:"disconnect-lanes";id:string;from:number;to:number}
@@ -375,8 +374,6 @@ export function applyEdit(
 
   try {
     switch (command.type) {
-      case "delete-building":
-        throw new Error("Здания доступны только для просмотра");
       case "mark-building-passage": {
         // Габариты арки не задаются: в OSM записывается только сам проезд.
         const source=requireElement(document,"way",command.wayId),tags=tagsOf(source);if(!tags.highway)throw Error("Выберите дорогу через здание");

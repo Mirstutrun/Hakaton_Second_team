@@ -447,3 +447,43 @@ test("search finds a street by name only, without OSM IDs", async ({ page }) => 
   await page.getByRole("button", { name: "Найти улицу" }).click();
   await expect(page.getByRole("alert")).toContainText("не найдена");
 });
+
+
+test("buildings stay visible but cannot be selected or changed", async ({ page }) => {
+  await ready(page);
+  await page.getByRole("button", { name: "2D", exact: true }).click();
+  const source = junction.replace('</osm>', `
+    <node id="21" lat="52.0006" lon="103.999"/>
+    <node id="22" lat="52.0006" lon="103.9993"/>
+    <node id="23" lat="52.0008" lon="103.9993"/>
+    <node id="24" lat="52.0008" lon="103.999"/>
+    <way id="20"><nd ref="21"/><nd ref="22"/><nd ref="23"/><nd ref="24"/><nd ref="21"/><tag k="building" v="yes"/><tag k="height" v="12"/></way>
+    </osm>`);
+  const building = await page.evaluate(async source => {
+    const store = (await import("/src/stores/editor.ts")).useEditorStore();
+    const { createProjection, documentOrigin } = await import("/src/core/geo/projection.ts");
+    store.load(source, "buildings.osm");
+    store.focusCoordinate = { lat: 52.0007, lon: 103.99915 };
+    store.focusRequest++;
+    store.selectOsmElement({ type: "way", id: "20" });
+    return createProjection(documentOrigin(store.document!)).project(store.focusCoordinate);
+  }, source);
+  expect((await state(page)).selection).toBeNull();
+  const point = await scenePoint(page, building.x, building.z);
+  await page.mouse.click(point.x, point.y);
+  expect((await state(page)).selection).toBeNull();
+  expect((await state(page)).dirty).toBe(false);
+  await expect(page.getByRole("button", { name: /Удалить здание|Новое здание/ })).toHaveCount(0);
+  for (const mode of ["2D", "3D"]) {
+    await page.getByRole("button", { name: mode, exact: true }).click();
+    const meshes = await page.evaluate(async () => {
+      const path = performance.getEntriesByType("resource")
+        .find(entry => entry.name.includes("/@babylonjs_core.js?"))!.name;
+      const { EngineStore } = await import(path);
+      return EngineStore.Instances[0].scenes[0].meshes
+        .filter((mesh: any) => mesh.metadata?.role === "building")
+        .map((mesh: any) => ({ visible: mesh.isEnabled() && mesh.isVisible, pickable: mesh.isPickable }));
+    });
+    expect(meshes).toEqual([{ visible: true, pickable: false }]);
+  }
+});

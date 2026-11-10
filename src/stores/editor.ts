@@ -1,3 +1,4 @@
+import { buildingWayIds } from "../core/osm/buildingProtection";
 import { networkConnectivity } from "../core/osm/connectivity";
 import { computed, markRaw, ref, shallowRef } from "vue";
 import { defineStore } from "pinia";
@@ -343,6 +344,8 @@ export const useEditorStore = defineStore("editor", () => {
   }
 
   function selectOsmElement(target: Selection | null) {
+    if (target?.type === "way" && document.value && buildingWayIds(document.value).has(target.id))
+      target = null;
     if (target) {
       inspectorOpen.value = true;
       toolsOpen.value = false;

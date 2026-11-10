@@ -32,5 +32,5 @@ export function buildBuilding(id:string,points:Vector3[],tags:Tags,scene:Scene,m
       const shade=.89+.06*Math.abs(dx/len)+.03*Math.abs(dz/len);for(let k=0;k<4;k++)color(shade);indices.push(start,start+2,start+1,start+1,start+2,start+3);
     }
   });
-  const mesh=new Mesh(`building:${id}`,scene),data=new VertexData();data.positions=positions;data.indices=indices;data.colors=colors;const normals:number[]=[];VertexData.ComputeNormals(positions,indices,normals);data.normals=normals;data.applyToMesh(mesh);mesh.material=material;mesh.useVertexColors=true;mesh.isPickable=true;mesh.metadata={role:"building",type:"way",id};return mesh;
+  const mesh=new Mesh(`building:${id}`,scene),data=new VertexData();data.positions=positions;data.indices=indices;data.colors=colors;const normals:number[]=[];VertexData.ComputeNormals(positions,indices,normals);data.normals=normals;data.applyToMesh(mesh);mesh.material=material;mesh.useVertexColors=true;mesh.isPickable=false;mesh.metadata={role:"building",type:"way",id};return mesh;
 }
