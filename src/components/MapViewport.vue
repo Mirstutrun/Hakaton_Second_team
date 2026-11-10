@@ -42,6 +42,13 @@ watch(
   () => manager?.refreshSelection(),
 );
 watch(
+  () => store.showGraphIssues,
+  () => {
+    manager?.refreshSelection();
+    manager?.visibility();
+  },
+);
+watch(
   () => store.workspaceMode,
   () => manager?.visibility(),
 );
@@ -177,7 +184,7 @@ onBeforeUnmount(() => manager?.dispose());
       <span><i class="legend-road"></i>Дорога</span
       ><span><i class="legend-building"></i>Здание</span
       ><span><i class="legend-selected"></i>Выбрано</span>
-      <span v-if="store.workspaceMode === 'review'"
+      <span v-if="store.showGraphIssues"
         ><i class="legend-issue"></i>Проверить</span
       >
     </div>

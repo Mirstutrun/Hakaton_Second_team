@@ -1,3 +1,4 @@
+import { buildRestrictionSigns } from "./geometry/restrictionSigns";
 import {
   ArcRotateCamera,
   Camera,
@@ -44,6 +45,7 @@ export class SceneManager {
   private junctionCounts = new Map<string, number>();
   private handles: Mesh[] = [];
   private issueMeshes: Mesh[] = [];
+  private restrictionMeshes: Mesh[] = [];
   private preview: Mesh | null = null;
   private routePreview: Mesh | null = null;
   private laneHighlight: Mesh | null = null;
@@ -113,7 +115,13 @@ export class SceneManager {
       line: "#c5cec4",
       issueCrossing: "#ffb968",
       issueBuilding: "#ff6e84",
-      issueGap: "#aee1ff",
+      issueGap: "#e7a443",
+      issueRoad: "#d85d54",
+      issueIsolated: "#ab77cc",
+      signRed: "#d94840",
+      signBlue: "#3978bd",
+      signWhite: "#fffdf3",
+      signInk: "#28333b",
       busStop: "#ffbf48",
     })) {
       const material = new StandardMaterial(name, this.scene);
@@ -550,10 +558,19 @@ export class SceneManager {
   }
 
   private refreshIssues() {
+    this.restrictionMeshes.forEach((mesh) => mesh.dispose());
+    this.restrictionMeshes = this.document
+      ? buildRestrictionSigns(
+          this.document,
+          this.projection,
+          this.scene,
+          this.materials,
+        )
+      : [];
     this.issueMeshes.forEach((mesh) => mesh.dispose());
     this.issueMeshes = [];
     if (!this.document) return;
-    for (const issue of this.store.geometryIssues) {
+    for (const issue of this.store.graphIssues) {
       if (
         !issue.coordinate ||
         !issue.id ||
@@ -574,7 +591,9 @@ export class SceneManager {
             ? "issueBuilding"
             : issue.code === "near-disconnection"
               ? "issueGap"
-              : "issueCrossing"
+              : issue.code === "isolated-component"
+                ? "issueIsolated"
+                : "issueCrossing"
         ];
       marker.metadata = {
         type: issue.elementType === "node" ? "node" : "way",
@@ -592,17 +611,41 @@ export class SceneManager {
     this.handles = [];
     if (!this.document) return;
     const selected = this.store.selection;
+    const problemWays = new Map(
+      this.store.graphIssues
+        .filter((i) => i.elementType === "way" && i.id)
+        .sort(
+          (a, b) =>
+            (a.code === "isolated-component" ? -1 : 0) -
+            (b.code === "isolated-component" ? -1 : 0),
+        )
+        .map((i) => [i.id!, i.code]),
+    );
+    for (const issue of this.store.graphIssues.filter(
+      (i) => i.elementType === "node" && i.id,
+    ))
+      for (const [id, way] of this.document.ways)
+        if (refsOf(way).includes(issue.id!)) problemWays.set(id, issue.code);
+    for (const component of this.store.connectivity?.components.slice(1) ?? [])
+      for (const id of component.ways)
+        if (!problemWays.has(id)) problemWays.set(id, "isolated-component");
     for (const [id, meshes] of this.wayMeshes) {
       const road = meshes.find((mesh) => mesh.metadata?.role === "road");
       if (road)
         road.material =
           selected?.type === "way" && selected.id === id
             ? this.materials.selected
-            : this.materials[
-                roadStyle(tagsOf(this.document.ways.get(id)!)).pedestrian
-                  ? "pedestrian"
-                  : "asphalt"
-              ];
+            : this.store.showGraphIssues && problemWays.has(id)
+              ? this.materials[
+                  problemWays.get(id) === "isolated-component"
+                    ? "issueIsolated"
+                    : "issueRoad"
+                ]
+              : this.materials[
+                  roadStyle(tagsOf(this.document.ways.get(id)!)).pedestrian
+                    ? "pedestrian"
+                    : "asphalt"
+                ];
     }
     if (selected?.type === "way" && this.store.selectedLane !== null) {
       const way = this.document.ways.get(selected.id);
@@ -658,7 +701,7 @@ export class SceneManager {
 
   visibility() {
     for (const mesh of this.issueMeshes)
-      mesh.setEnabled(this.store.workspaceMode === "review");
+      mesh.setEnabled(this.store.showGraphIssues);
     for (const mesh of this.vehicleMeshes.values())
       mesh.setEnabled(this.store.workspaceMode === "traffic");
     for (const [id, meshes] of this.wayMeshes) {
@@ -992,11 +1035,16 @@ export class SceneManager {
       const { id, point } = this.drag;
       this.drag = null;
       this.camera.attachControl(this.canvas, true);
-      this.store.execute({
+      const patch = this.store.execute({
         type: "move-node",
         id,
         coordinate: this.projection.unproject(point),
       });
+      if (!patch) {
+        this.refreshSelection();
+        this.refreshSignal(id);
+        this.visibility();
+      }
       return;
     }
     if (

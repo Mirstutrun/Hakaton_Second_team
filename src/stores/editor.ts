@@ -1,3 +1,4 @@
+import { networkConnectivity } from "../core/osm/connectivity";
 import { computed, markRaw, ref, shallowRef } from "vue";
 import { defineStore } from "pinia";
 import { reviewBaseline, reviewReport } from "../core/osm/reviewReport";
@@ -6,6 +7,8 @@ import { serializeOsm } from "../core/osm/serializer";
 import { applyEdit, applyPatch, type EditCommand } from "../core/osm/commands";
 import {
   tagsOf,
+  refsOf,
+  coordinateOf,
   type EditPatch,
   type Coordinate,
   type OsmDocument,
@@ -39,6 +42,8 @@ export const useEditorStore = defineStore("editor", () => {
   const routeName = ref("");
   const workspaceMode = ref<"edit" | "traffic" | "review">("edit");
   const helpOpen = ref(false);
+  const showGraphIssues = ref(true);
+  const preflightOpen = ref(false);
   const inspectorOpen = ref(false);
   const toolsOpen = ref(false);
   const zoomRequest = ref(0);
@@ -74,6 +79,50 @@ export const useEditorStore = defineStore("editor", () => {
     revision.value;
     return document.value ? validateOsm(document.value) : [];
   });
+  const connectivity = computed(() => {
+    revision.value;
+    return document.value ? networkConnectivity(document.value) : null;
+  });
+  const graphIssues = computed(() => {
+    const doc = document.value;
+    return [...issues.value, ...geometryIssues.value].map((issue) => {
+      const type =
+        issue.elementType ??
+        (issue.id && doc?.nodes.has(issue.id)
+          ? "node"
+          : issue.id && doc?.ways.has(issue.id)
+            ? "way"
+            : undefined);
+      let coordinate = issue.coordinate;
+      if (!coordinate && issue.id && doc) {
+        const node =
+          type === "node"
+            ? doc.nodes.get(issue.id)
+            : type === "way"
+              ? doc.nodes.get(refsOf(doc.ways.get(issue.id)!)[0])
+              : undefined;
+        if (node) coordinate = coordinateOf(node);
+      }
+      return { ...issue, elementType: type, coordinate };
+    });
+  });
+  const preflight = computed(() => ({
+    errors: issues.value.filter((i) => i.severity === "error"),
+    conflicts: geometryIssues.value.filter((i) =>
+      ["road-building-overlap", "unconnected-crossing", "zero-length", "limit"].includes(
+        i.code || "",
+      ),
+    ),
+    components: connectivity.value?.components.length ?? 0,
+    directedComponents: connectivity.value?.directedComponents ?? 0,
+  }));
+  const canExportChecked = computed(
+    () =>
+      !!document.value &&
+      preflight.value.errors.length === 0 &&
+      preflight.value.conflicts.length === 0 &&
+      preflight.value.components === 1,
+  );
   const stats = computed(() => {
     revision.value;
     const data = document.value;
@@ -192,8 +241,21 @@ export const useEditorStore = defineStore("editor", () => {
     message.value = "Действие повторено";
   }
 
-  function exportOsm() {
+  function exportOsm(mode: "checked" | "draft" | "confirm" = "checked") {
     if (!document.value) return;
+    if (
+      mode !== "draft" &&
+      (!canExportChecked.value ||
+        (mode === "checked" && preflight.value.directedComponents > 1))
+    ) {
+      preflightOpen.value = true;
+      showGraphIssues.value = true;
+      workspaceMode.value = "review";
+      inspectorOpen.value = true;
+      message.value =
+        "Перед сохранением проверьте связность и выделенные ошибки";
+      return;
+    }
     try {
       const source = serializeOsm(document.value);
       const url = URL.createObjectURL(
@@ -201,12 +263,18 @@ export const useEditorStore = defineStore("editor", () => {
       );
       const link = window.document.createElement("a");
       link.href = url;
-      link.download = fileName.value.replace(/\.osm$/i, "") + "-edited.osm";
+      link.download =
+        fileName.value.replace(/\.(osm|xml)$/i, "") +
+        (mode === "draft" ? "-draft.osm" : "-edited.osm");
       link.click();
       setTimeout(() => URL.revokeObjectURL(url), 1000);
-      savedCursor.value = cursor.value;
+      if (mode !== "draft") savedCursor.value = cursor.value;
+      preflightOpen.value = false;
       error.value = "";
-      message.value = "OSM экспортирован с сохранением отношений и метаданных";
+      message.value =
+        mode === "draft"
+          ? "Черновик сохранён. Ошибки сети остаются и выделены на карте"
+          : "OSM сохранён после проверки связности";
     } catch (cause) {
       error.value = (cause as Error).message;
     }
@@ -311,6 +379,12 @@ export const useEditorStore = defineStore("editor", () => {
     routes,
     workspaceMode,
     helpOpen,
+    showGraphIssues,
+    preflightOpen,
+    connectivity,
+    graphIssues,
+    preflight,
+    canExportChecked,
     inspectorOpen,
     toolsOpen,
     zoomRequest,

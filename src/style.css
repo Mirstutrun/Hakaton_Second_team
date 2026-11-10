@@ -1867,3 +1867,135 @@ button.primary,
 .viewport {
   grid-column: 2;
 }
+.turn-panel {
+  border: 1px solid #dbe5dc;
+  border-radius: 8px;
+  padding: 12px;
+  margin: 12px 0;
+  font-size: 11px;
+  background: #fafcf9;
+}
+.turn-panel label {
+  display: grid;
+  gap: 6px;
+  color: #617565;
+  margin: 12px 0;
+}
+.turn-panel select {
+  font-size: 11px;
+}
+.restriction-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-top: 1px solid #e0e7df;
+  padding: 12px 0;
+}
+.restriction-row > span {
+  flex: 1;
+  font-size: 11px;
+}
+.restriction-row small {
+  display: block;
+  color: #87978a;
+  font-size: 9px;
+  margin-top: 5px;
+}
+.restriction-row button {
+  padding: 5px;
+  font-size: 10px;
+}
+.sign-preview {
+  width: 58px;
+  height: 58px;
+  border: 6px solid #d9473e;
+  border-radius: 50%;
+  background: #fff;
+  display: grid;
+  place-items: center;
+  margin: 14px auto;
+  position: relative;
+}
+.sign-preview.mandatory {
+  border-color: #3978bd;
+  background: #3978bd;
+  color: white;
+}
+.sign-symbol {
+  font-size: 35px;
+  line-height: 1;
+}
+.sign-preview i {
+  position: absolute;
+  width: 44px;
+  height: 5px;
+  background: #d9473e;
+  transform: rotate(-45deg);
+}
+.preflight-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin: 20px 0;
+}
+.preflight-metrics span {
+  font-size: 10px;
+  background: #f3f6f0;
+  border-radius: 8px;
+  padding: 12px;
+  text-align: center;
+  color: #748471;
+}
+.preflight-metrics b {
+  display: block;
+  font-size: 25px;
+  color: #8f6141;
+  font-weight: 500;
+}
+.preflight-list {
+  font-size: 11px;
+  color: #98664e;
+  line-height: 1.7;
+  padding-left: 18px;
+  max-height: 180px;
+  overflow: auto;
+}
+.help-dialog > .full-width {
+  margin-top: 9px;
+}
+.connectivity-summary {
+  display: grid;
+  gap: 6px;
+  padding: 12px;
+  background: #f1f6ee;
+  border-radius: 8px;
+  margin: 12px 0;
+  color: #617b57;
+  font-size: 11px;
+}
+.connectivity-summary span {
+  font-size: 10px;
+}
+.issue-toggle {
+  font-size: 10px;
+  padding: 7px 9px;
+  margin-left: auto;
+}
+.issue-toggle[aria-pressed="true"] {
+  background: #fff1ec;
+  border-color: #edc4b7;
+  color: #a46d53;
+}
+@media (max-width: 700px) {
+  .issue-toggle {
+    font-size: 8px;
+    max-width: 90px;
+    padding: 5px;
+  }
+  .help-button {
+    display: none;
+  }
+  .mode-tabs > button {
+    padding: 10px 5px;
+  }
+}

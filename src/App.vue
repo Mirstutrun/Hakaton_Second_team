@@ -104,6 +104,13 @@ async function importFile(event: Event) {
   }
 }
 function keyboard(event: KeyboardEvent) {
+  if (store.preflightOpen) {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      store.preflightOpen = false;
+    }
+    return;
+  }
   if (store.helpOpen) {
     if (event.key === "Escape") {
       event.preventDefault();
@@ -271,6 +278,14 @@ onBeforeUnmount(() => {
         </button>
       </div>
       <button
+        class="issue-toggle"
+        :aria-pressed="store.showGraphIssues"
+        @click="store.showGraphIssues = !store.showGraphIssues"
+      >
+        {{ store.showGraphIssues ? "Скрыть ошибки" : "Выделить ошибки" }} ·
+        {{ store.graphIssues.length }}
+      </button>
+      <button
         class="help-button"
         @click="store.helpOpen = !store.helpOpen"
         :aria-expanded="store.helpOpen"
@@ -305,6 +320,94 @@ onBeforeUnmount(() => {
         </button>
       </aside>
       <PropertiesPanel v-else />
+    </div>
+    <div
+      v-if="store.preflightOpen"
+      class="help-backdrop"
+      @click.self="store.preflightOpen = false"
+    >
+      <section
+        class="help-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Проверка перед сохранением"
+      >
+        <button
+          class="close-help"
+          aria-label="Закрыть проверку сохранения"
+          @click="store.preflightOpen = false"
+        >
+          ×
+        </button>
+        <span class="section-label">ПРОВЕРКА ПЕРЕД СОХРАНЕНИЕМ</span>
+        <h2>
+          {{
+            store.canExportChecked
+              ? "Проверьте направления проезда"
+              : "В графе есть проблемы"
+          }}
+        </h2>
+        <div class="preflight-metrics">
+          <span
+            ><b>{{ store.preflight.components }}</b> частей сети</span
+          ><span
+            ><b>{{ store.preflight.conflicts.length }}</b> конфликтов
+            геометрии</span
+          ><span
+            ><b>{{ store.preflight.errors.length }}</b> ошибок файла</span
+          >
+        </div>
+        <p v-if="store.preflight.components > 1">
+          Дорожная сеть состоит из отдельных частей. Между ними нет общего
+          дорожного узла. Соедините нужные участки или сохраните рабочий
+          черновик.
+        </p>
+        <p v-if="store.preflight.directedComponents > 1">
+          С учётом односторонних дорог обнаружено
+          {{ store.preflight.directedComponents }} групп взаимной достижимости.
+          На границах выгрузки это возможно, но направления нужно проверить.
+        </p>
+        <ul class="preflight-list">
+          <li
+            v-for="(issue, index) in [
+              ...store.preflight.errors,
+              ...store.preflight.conflicts,
+            ].slice(0, 8)"
+            :key="index"
+          >
+            {{ issue.message }}
+          </li>
+        </ul>
+        <p>
+          Проверка относится к данным OSM. Она не заменяет сверку с реальной
+          картой и прогон серверных симуляторов.
+        </p>
+        <button
+          class="primary full-width"
+          @click="
+            store.preflightOpen = false;
+            store.workspaceMode = 'review';
+            store.showGraphIssues = true;
+            store.inspectorOpen = true;
+          "
+        >
+          Показать проблемы на карте
+        </button>
+        <button
+          v-if="store.canExportChecked"
+          class="full-width"
+          @click="store.exportOsm('confirm')"
+        >
+          Направления проверены — сохранить OSM
+        </button>
+        <button
+          class="full-width"
+          :disabled="!!store.preflight.errors.length"
+          @click="store.exportOsm('draft')"
+        >
+          Сохранить рабочий черновик с предупреждениями
+        </button>
+      </section>
     </div>
     <div
       v-if="store.helpOpen"

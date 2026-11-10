@@ -9,7 +9,7 @@ const open = ref(true);
 const filter = ref("all");
 const mapOpen = ref(false);
 const showAll = ref(false);
-const issueList = computed(() => store.geometryIssues);
+const issueList = computed(() => store.graphIssues);
 const visibleIssues = computed(() =>
   issueList.value
     .map((issue, index) => ({ issue, index }))
@@ -106,6 +106,23 @@ function repair(index: number) {
 
 <template>
   <div class="qa-dock">
+    <label class="toggle"
+      ><span>Выделять ошибки на графе</span
+      ><input v-model="store.showGraphIssues" type="checkbox"
+    /></label>
+    <p class="field-hint">
+      Красный — геометрия и ошибки, оранжевый — разрывы, фиолетовый — отдельные
+      части сети.
+    </p>
+    <div class="connectivity-summary">
+      <strong
+        >Связность:
+        {{ store.connectivity?.components.length || 0 }} частей</strong
+      ><span
+        >С учётом направлений:
+        {{ store.connectivity?.directedComponents || 0 }} групп</span
+      >
+    </div>
     <div class="qa-actions">
       <button class="qa-trigger" :aria-expanded="open" @click="open = !open">
         <span class="qa-symbol">◇</span>
@@ -150,6 +167,9 @@ function repair(index: number) {
           <option value="unconnected-crossing">Пересечения без узла</option>
           <option value="near-disconnection">Разрывы рядом с дорогой</option>
           <option value="road-building-overlap">Дорога через здание</option>
+          <option value="invalid-restriction">
+            Неполные ограничения поворотов
+          </option>
           <option value="isolated-component">Изолированные участки</option>
         </select>
       </label>

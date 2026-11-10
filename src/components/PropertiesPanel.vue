@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import TurnRestrictionsPanel from "./TurnRestrictionsPanel.vue";
 import { computed, reactive, ref, watch } from "vue";
 import { coordinateOf, refsOf, tagsOf } from "../core/osm/model";
 import { laneTagInfo } from "../engine/trafficRules";
@@ -297,6 +298,7 @@ function removeVertex() {
           <button class="primary full-width">Применить к полосе</button>
         </form>
       </details>
+      <TurnRestrictionsPanel v-if="isRoad" />
       <form class="properties-form" @submit.prevent="apply">
         <template v-if="isRoad">
           <label
