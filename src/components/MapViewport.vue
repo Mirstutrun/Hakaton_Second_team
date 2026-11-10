@@ -76,7 +76,7 @@ watch(
 watch(
   () => store.drivingSide,
   () => {
-    manager?.resetTrafficAfterEdit();
+    manager?.refreshDrivingSide();
     manager?.addVehicles(18);
   },
 );

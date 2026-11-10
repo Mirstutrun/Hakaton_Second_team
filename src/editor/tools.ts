@@ -1,4 +1,14 @@
-export type EditorTool = "select" | "lane" | "car" | "draw" | "join" | "move" | "insert" | "signal" | "bus-stop" | "bus-route";
+export type EditorTool =
+  | "select"
+  | "lane"
+  | "car"
+  | "draw"
+  | "join"
+  | "move"
+  | "insert"
+  | "signal"
+  | "bus-stop"
+  | "bus-route";
 
 export const editorTools: {
   id: EditorTool;
@@ -8,7 +18,7 @@ export const editorTools: {
 }[] = [
   {
     id: "select",
-    name: "Выбор",
+    name: "Выбрать объект",
     key: "V",
     hint: "Нажмите на дорогу или светофор. Правая кнопка — панорама, колесо — масштаб.",
   },
@@ -26,7 +36,7 @@ export const editorTools: {
   },
   {
     id: "draw",
-    name: "Дорога",
+    name: "Новая дорога",
     key: "D",
     hint: "Ставьте точки. Рядом с узлом сработает привязка. Enter — завершить, Esc — отменить.",
   },
@@ -38,19 +48,19 @@ export const editorTools: {
   },
   {
     id: "move",
-    name: "Геометрия",
+    name: "Переместить узел",
     key: "M",
     hint: "Выберите дорогу, затем перетащите её вершину. Общий узел перемещается во всех дорогах.",
   },
   {
     id: "insert",
-    name: "Вершина",
+    name: "Добавить узел",
     key: "I",
-    hint: "Нажмите на сегмент выбранной дороги, чтобы добавить вершину.",
+    hint: "Выберите дорогу, затем нажмите на участок между двумя узлами, чтобы добавить новый узел.",
   },
   {
     id: "signal",
-    name: "Светофор",
+    name: "Поставить светофор",
     key: "T",
     hint: "Нажмите на дорогу, чтобы установить светофор на ближайший сегмент.",
   },

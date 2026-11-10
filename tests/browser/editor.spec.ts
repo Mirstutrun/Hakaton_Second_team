@@ -91,10 +91,14 @@ test("real map: edit lanes, draw, move, signal, delete, undo, export and reimpor
   expect((await state(page)).tags.lanes).toBe("2");
   await page.getByRole("button", { name: "Повторить", exact: true }).click();
   expect((await state(page)).tags.lanes).toBe("4");
-  await page.getByRole("button", { name: "Выбор V", exact: false }).click();
+  await page
+    .getByRole("button", { name: "Выбрать объект V", exact: false })
+    .click();
   await page.locator("canvas").click({ position: { x: 500, y: 100 } });
   await page.getByRole("button", { name: "Центрировать", exact: true }).click();
-  await page.getByRole("button", { name: "Дорога D", exact: false }).click();
+  await page
+    .getByRole("button", { name: "Новая дорога D", exact: false })
+    .click();
   for (const point of [
     { x: -170, z: -80 },
     { x: 0, z: -80 },
@@ -108,7 +112,9 @@ test("real map: edit lanes, draw, move, signal, delete, undo, export and reimpor
   const newRoad = (await state(page)).selection.id;
   expect((await state(page)).roads).toBe(862);
   await page.getByRole("button", { name: "Центрировать", exact: true }).click();
-  await page.getByRole("button", { name: "Геометрия M", exact: false }).click();
+  await page
+    .getByRole("button", { name: "Переместить узел M", exact: false })
+    .click();
   const start = await scenePoint(page, 0, -80);
   const end = await scenePoint(page, 0, -30);
   await page.mouse.move(start.x, start.y);
@@ -128,7 +134,9 @@ test("real map: edit lanes, draw, move, signal, delete, undo, export and reimpor
     });
   });
   expect(moved.z).toBeCloseTo(-30, 0);
-  await page.getByRole("button", { name: "Светофор T", exact: false }).click();
+  await page
+    .getByRole("button", { name: "Поставить светофор T", exact: false })
+    .click();
   const signalPoint = await scenePoint(page, -85, -80);
   await page.mouse.click(signalPoint.x, signalPoint.y);
   expect((await state(page)).signals).toBe(3);

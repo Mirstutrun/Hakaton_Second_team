@@ -1770,6 +1770,51 @@ footer {
 }
 
 /* Keep secondary copy readable on white; avoid tiny instruction text. */
-.tools-intro p,.field-hint,.map-instruction p,.empty-inspector p,.help-steps p,.qa-subtitle,.traffic-note,.validation summary{color:#687b6d;font-size:11px}
-.map-legend span,.project-card>div,.traffic-metrics span,.traffic-heading small,.traffic-side,.bus-panel,.traffic-speed,.qa-issue-actions button,.qa-more,.qa-filter,.reference-panel a{font-size:10px;color:#6d806c}
-button.primary,.traffic-add,.qa-repair{color:#fff}.qa-repair{background:#267b68;border-color:#267b68}.section-label{color:#768972}
+.tools-intro p,
+.field-hint,
+.map-instruction p,
+.empty-inspector p,
+.help-steps p,
+.qa-subtitle,
+.traffic-note,
+.validation summary {
+  color: #687b6d;
+  font-size: 11px;
+}
+.map-legend span,
+.project-card > div,
+.traffic-metrics span,
+.traffic-heading small,
+.traffic-side,
+.bus-panel,
+.traffic-speed,
+.qa-issue-actions button,
+.qa-more,
+.qa-filter,
+.reference-panel a {
+  font-size: 10px;
+  color: #6d806c;
+}
+button.primary,
+.traffic-add,
+.qa-repair {
+  color: #fff;
+}
+.qa-repair {
+  background: #267b68;
+  border-color: #267b68;
+}
+.section-label {
+  color: #768972;
+}
+.traffic-add:hover:not(:disabled),
+.qa-repair:hover:not(:disabled) {
+  background: #1b6555;
+  color: #fff;
+}
+.properties-form > .primary {
+  position: sticky;
+  bottom: -8px;
+  z-index: 2;
+  box-shadow: 0 -7px 15px #ffffffc9;
+}

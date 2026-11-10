@@ -63,7 +63,7 @@ function switchMode(mode: "edit" | "traffic" | "review") {
   store.joinSource = null;
   store.selectedLane = null;
   store.workspaceMode = mode;
-  if (mode === "review") store.inspectorOpen = true;
+  store.inspectorOpen = mode === "review";
 }
 const hint = computed(
   () => editorTools.find((tool) => tool.id === store.tool)?.hint,

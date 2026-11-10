@@ -266,6 +266,7 @@ export class SceneManager {
           this.materials[style.pedestrian ? "pedestrian" : "asphalt"],
           this.materials.line,
           this.protectedCorners(refs),
+          this.store.drivingSide,
         ),
       );
     }
@@ -359,6 +360,14 @@ export class SceneManager {
     this.visibility();
   }
 
+  refreshDrivingSide() {
+    if (!this.document) return;
+    for (const [id, way] of this.document.ways)
+      if (tagsOf(way).highway) this.refreshWay(id);
+    this.resetTrafficAfterEdit();
+    this.refreshSelection();
+    this.visibility();
+  }
   resetTrafficAfterEdit() {
     this.clearVehicles();
     if (this.document)

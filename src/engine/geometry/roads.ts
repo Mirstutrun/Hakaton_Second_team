@@ -6,7 +6,11 @@ import {
   type Scene,
   type Material,
 } from "@babylonjs/core";
-import { oneWayDirection } from "../trafficRules";
+import {
+  drivingLanes,
+  oneWayDirection,
+  type DrivingSide,
+} from "../trafficRules";
 import type { Tags } from "../../core/osm/model";
 
 export const pedestrianTypes = new Set([
@@ -204,9 +208,15 @@ export function buildRoad(
   material: Material,
   lineMaterial: Material,
   protectedIndices?: ReadonlySet<number>,
+  side: DrivingSide = "left",
 ): Mesh[] {
   if (points.length < 2) return [];
   const style = roadStyle(tags);
+  const layout = drivingLanes(tags, style.lanes, side);
+  const dividingLane =
+    side === "left"
+      ? Math.min(...layout.forward)
+      : Math.max(...layout.forward) + 1;
   const path = smoothRoadPoints(
     points.map((point) => new Vector3(point.x, style.elevation, point.z)),
     8,
@@ -244,10 +254,7 @@ export function buildRoad(
           .scale(-style.width / 2 + (lane * style.width) / style.lanes)
           .add(new Vector3(0, 0.07, 0));
         const length = Vector3.Distance(a, b);
-        if (
-          oneWayDirection(tags) === 0 &&
-          lane === Math.floor(style.lanes / 2)
-        ) {
+        if (oneWayDirection(tags) === 0 && lane === dividingLane) {
           lines.push([a.add(offset), b.add(offset)]);
           continue;
         }
