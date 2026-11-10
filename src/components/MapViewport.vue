@@ -153,7 +153,13 @@ onBeforeUnmount(() => manager?.dispose());
       }}</span>
       <div>
         <strong>{{ activeTool.name }}</strong>
-        <p>{{ activeTool.hint }}</p>
+        <p>
+          {{
+            store.tool === "join" && store.joinSource
+              ? `Конец дороги ${store.joinSource.wayId} выбран. Теперь нажмите на другую дорогу или её узел.`
+              : activeTool.hint
+          }}
+        </p>
       </div>
       <button
         v-if="store.tool !== 'select'"
@@ -175,6 +181,16 @@ onBeforeUnmount(() => manager?.dispose());
         ><i class="legend-issue"></i>Проверить</span
       >
     </div>
+    <button
+      class="mobile-tools"
+      @click="
+        store.toolsOpen = !store.toolsOpen;
+        store.inspectorOpen = false;
+      "
+      :aria-expanded="store.toolsOpen"
+    >
+      {{ store.toolsOpen ? "Скрыть инструменты" : "Инструменты" }}
+    </button>
     <button
       class="mobile-inspector"
       @click="store.inspectorOpen = !store.inspectorOpen"
@@ -236,21 +252,6 @@ onBeforeUnmount(() => manager?.dispose());
       <button
         @click="
           store.routeDraft = [];
-          store.tool = 'select';
-        "
-      >
-        Отмена
-      </button>
-    </div>
-    <div v-if="store.tool === 'join'" class="draw-card join-card">
-      <span>{{
-        store.joinSource
-          ? `Конец дороги ${store.joinSource.wayId} выбран. Нажмите на другую дорогу.`
-          : "Выберите свободный конец дороги"
-      }}</span>
-      <button
-        @click="
-          store.joinSource = null;
           store.tool = 'select';
         "
       >

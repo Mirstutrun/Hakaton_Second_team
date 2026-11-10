@@ -1818,3 +1818,48 @@ button.primary,
   z-index: 2;
   box-shadow: 0 -7px 15px #ffffffc9;
 }
+
+.draw-card {
+  pointer-events: none;
+}
+.draw-card button,
+.draw-card input {
+  pointer-events: auto;
+}
+
+.brand-mark {
+  flex-shrink: 0;
+}
+.mobile-tools {
+  display: none;
+}
+@media (max-width: 700px) {
+  .workspace:not(.tools-open) {
+    grid-template-columns: 0 minmax(0, 1fr);
+  }
+  .workspace:not(.tools-open) > .tools-panel {
+    display: none;
+  }
+  .workspace.inspector-open > .properties-panel,
+  .workspace.inspector-open > .review-sidebar {
+    width: min(300px, calc(100% - 12px));
+  }
+  .mobile-tools {
+    display: block;
+    position: absolute;
+    bottom: 17px;
+    left: 12px;
+    z-index: 7;
+    font-size: 10px;
+  }
+  .mobile-inspector {
+    left: auto;
+    right: 12px;
+  }
+  .workspace.tools-open .mobile-inspector {
+    display: none;
+  }
+  .workspace.tools-open .mobile-tools {
+    font-size: 9px;
+  }
+}

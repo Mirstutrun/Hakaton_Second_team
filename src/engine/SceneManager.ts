@@ -213,6 +213,7 @@ export class SceneManager {
     this.refreshIssues();
     this.visibility();
     this.fitMap();
+    this.camera.radius = Math.min(this.camera.radius, 1800);
     this.addVehicles(18);
   }
 

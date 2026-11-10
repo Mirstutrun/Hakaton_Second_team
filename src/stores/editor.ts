@@ -40,6 +40,7 @@ export const useEditorStore = defineStore("editor", () => {
   const workspaceMode = ref<"edit" | "traffic" | "review">("edit");
   const helpOpen = ref(false);
   const inspectorOpen = ref(false);
+  const toolsOpen = ref(false);
   const zoomRequest = ref(0);
   const fitRequest = ref(0);
   const trafficRunning = ref(false);
@@ -244,7 +245,10 @@ export const useEditorStore = defineStore("editor", () => {
   }
 
   function selectOsmElement(target: Selection | null) {
-    if (target) inspectorOpen.value = true;
+    if (target) {
+      inspectorOpen.value = true;
+      toolsOpen.value = false;
+    }
     selection.value = target;
     selectedVertex.value = target?.type === "node" ? target.id : null;
     selectedLane.value = null;
@@ -308,6 +312,7 @@ export const useEditorStore = defineStore("editor", () => {
     workspaceMode,
     helpOpen,
     inspectorOpen,
+    toolsOpen,
     zoomRequest,
     fitRequest,
     trafficRunning,

@@ -278,7 +278,15 @@ onBeforeUnmount(() => {
         ? Как работать
       </button>
     </nav>
-    <div :class="['workspace', { 'inspector-open': store.inspectorOpen }]">
+    <div
+      :class="[
+        'workspace',
+        {
+          'inspector-open': store.inspectorOpen,
+          'tools-open': store.toolsOpen,
+        },
+      ]"
+    >
       <EditorToolbar /><MapViewport />
       <aside v-if="store.workspaceMode === 'review'" class="review-sidebar">
         <span class="section-label">ПЕРЕД СОХРАНЕНИЕМ</span>

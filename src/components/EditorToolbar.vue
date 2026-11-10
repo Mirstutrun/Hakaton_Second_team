@@ -57,6 +57,7 @@ const groups = computed<{ title: string; tools: EditorTool[] }[]>(() =>
         ],
 );
 function choose(id: EditorTool) {
+  store.toolsOpen = false;
   store.tool = id;
   store.draft = [];
   store.joinSource = null;
