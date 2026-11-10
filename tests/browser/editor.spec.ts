@@ -368,57 +368,6 @@ test("join tool connects an existing endpoint to a road", async ({ page }) => {
   expect(connected).toBe(true);
 });
 
-test("driving side selector and before-after report preserve OSM", async ({
-  page,
-}) => {
-  await page.goto("/");
-  await expect(page.getByText("Ссылки дорог корректны")).toBeVisible({
-    timeout: 60000,
-  });
-  const before = await page.evaluate(async () => {
-    const store = (await import("/src/stores/editor.ts")).useEditorStore();
-    store.load(
-      '<osm version="0.6"><node id="1" lat="52" lon="104"/><node id="2" lat="52" lon="104.002"/><way id="10"><nd ref="1"/><nd ref="2"/><tag k="highway" v="residential"/><tag k="lanes" v="4"/></way></osm>',
-      "test.osm",
-    );
-    return store.document!.xml.documentElement.outerHTML;
-  });
-  await page.getByRole("button", { name: "Транспорт", exact: true }).click();
-  await expect(
-    page.getByRole("combobox", { name: "Сторона движения" }),
-  ).toHaveValue("left");
-  await page
-    .getByRole("combobox", { name: "Сторона движения" })
-    .selectOption("right");
-  expect(
-    await page.evaluate(async () => {
-      const store = (await import("/src/stores/editor.ts")).useEditorStore();
-      return store.document!.xml.documentElement.outerHTML;
-    }),
-  ).toBe(before);
-  await page.evaluate(async () => {
-    const store = (await import("/src/stores/editor.ts")).useEditorStore();
-    store.execute({
-      type: "set-tags",
-      target: { type: "way", id: "10" },
-      tags: { lanes: "2" },
-    });
-  });
-  await page.getByRole("button", { name: "Проверка", exact: true }).click();
-  const downloading = page.waitForEvent("download");
-  await page
-    .getByRole("button", { name: "Отчёт до / после для защиты" })
-    .click();
-  const download = await downloading;
-  expect(download.suggestedFilename()).toBe("test-before-after.json");
-  const stream = await download.createReadStream();
-  const chunks: Buffer[] = [];
-  for await (const chunk of stream!) chunks.push(Buffer.from(chunk));
-  const report = JSON.parse(Buffer.concat(chunks).toString());
-  expect(report.changes.ways.modified).toEqual(["10"]);
-  expect(report.before.ways).toBe(1);
-  expect(report.after.ways).toBe(1);
-});
 
 test("clear workspace modes, help and narrow-screen inspector", async ({
   page,

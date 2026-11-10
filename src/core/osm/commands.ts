@@ -1,3 +1,7 @@
+import { buildingShapes, buildingOwner, shapeContains, segmentCrossing } from "./buildingShapes";
+import { formatConnectivity, parseConnectivity } from "./laneConnectivity";
+import { drivingLanes, laneTagInfo, type DrivingSide } from "../../engine/trafficRules";
+import { roadStyle } from "../../engine/geometry/roads";
 import { oneWayDirection } from "../../engine/trafficRules";
 import { assertRoadEditSafe } from "./roadSafety";
 import { restrictionNames, TurnRules } from "./turnRestrictions";
@@ -22,6 +26,17 @@ import type {
 } from "./model";
 
 export type EditCommand =
+ | {type:"move-block";id:string;point:RoadPoint}
+ | {type:"delete-building";wayId:string}
+ | {type:"create-building";points:Coordinate[];tags:Tags}
+ | {type:"create-block";point:RoadPoint}
+ | {type:"delete-block";id:string}
+ | {type:"set-area-tags";id:string;elementType:"node"|"way"|"relation";tags:Record<string,string|null>}
+ | {type:"move-area";wayId:string;east:number;north:number}
+ | {type:"add-courtyard";wayId:string;points:Coordinate[]}
+ | {type:"mark-building-passage";wayId:string;buildingId:string;width:number;height:number}
+ | {type:"connect-lanes";fromWay:string;toWay:string;via:string;fromNode:string;toNode:string;fromLane:number;toLane:number;drivingSide:DrivingSide}
+ | {type:"disconnect-lanes";id:string;from:number;to:number}
   | {
       type: "set-turn-restriction";
       fromWay: string;
@@ -239,8 +254,224 @@ export function applyEdit(
     way.insertBefore(nd, refs[index]);
     return id;
   };
+        const splitWay = (wayId:string,via:string,pieces=new Map<string,string[]>()) => {
+          const way = requireElement(document, "way", wayId),
+            refs = refsOf(way),
+            at = refs.indexOf(via);
+          if (at < 1 || at === refs.length - 1) return;
+          if (refs.lastIndexOf(via) !== at || refs[0] === refs[refs.length - 1])
+            throw Error(
+              "Сначала разделите замкнутую дорогу на обычные участки",
+            );
+          const relations = Array.from(document.relations.values()).filter(
+            (rel) =>
+              childElements(rel).some(
+                (m) =>
+                  m.tagName === "member" &&
+                  m.getAttribute("type") === "way" &&
+                  m.getAttribute("ref") === wayId,
+              ),
+          );
+          for (const rel of relations) {
+            const t = tagsOf(rel);
+            if (!["route", "restriction", "connectivity"].includes(t.type))
+              throw Error(
+                "Разделение дороги затронет сложное OSM-отношение. Выберите уже разделённый подъезд",
+              );
+            if (
+              ["restriction","connectivity"].includes(t.type) &&
+              childElements(rel).some(
+                (m) =>
+                  m.getAttribute("role") === "via" &&
+                  m.getAttribute("type") === "way" &&
+                  m.getAttribute("ref") === wayId,
+              )
+            )
+              throw Error(
+                "Дорога уже является via-way ограничения. Выберите другой подъезд",
+              );
+            if (
+              ["restriction","connectivity"].includes(t.type) &&
+              childElements(rel).some(
+                (m) =>
+                  m.getAttribute("role") === "via" &&
+                  m.getAttribute("ref") === via,
+              )
+            )
+              throw Error(
+                "На этом подъезде уже есть неоднозначное ограничение; сначала удалите его",
+              );
+          }
+          const fresh = newElement("way"),
+            newId = fresh.getAttribute("id")!;
+          pieces.set(wayId, [wayId, newId]);
+          for (const child of childElements(way).filter(
+            (c) => c.tagName !== "nd",
+          ))
+            fresh.appendChild(child.cloneNode(true));
+          const write = (element: Element, ids: string[]) => {
+            for (const n of childElements(element).filter(
+              (c) => c.tagName === "nd",
+            ))
+              n.remove();
+            const before = element.firstElementChild;
+            for (const ref of ids) {
+              const nd = document.xml.createElement("nd");
+              nd.setAttribute("ref", ref);
+              element.insertBefore(nd, before);
+            }
+          };
+          touch("way", wayId);
+          write(way, refs.slice(0, at + 1));
+          write(fresh, refs.slice(at));
+          for (const rel of relations) {
+            touch("relation", rel.getAttribute("id")!);
+            const members = childElements(rel).filter(
+              (m) => m.tagName === "member",
+            );
+            for (const member of members.filter(
+              (m) =>
+                m.getAttribute("type") === "way" &&
+                m.getAttribute("ref") === wayId,
+            )) {
+              if (["restriction","connectivity"].includes(tagsOf(rel).type)) {
+                const viaId = members
+                  .find(
+                    (m) =>
+                      m.getAttribute("role") === "via" &&
+                      m.getAttribute("type") === "node",
+                  )
+                  ?.getAttribute("ref");
+                if (!viaId)
+                  throw Error(
+                    "Не удалось безопасно обновить существующее ограничение поворота",
+                  );
+                if (refs.slice(at + 1).includes(viaId))
+                  member.setAttribute("ref", newId);
+              } else {
+                const clone = member.cloneNode(true) as Element;
+                clone.setAttribute("ref", newId);
+                const before = members
+                  .slice(0, members.indexOf(member))
+                  .reverse()
+                  .find((m) => m.getAttribute("type") === "way");
+                const prevRefs = before
+                  ? refsOf(
+                      document.ways.get(before.getAttribute("ref")!) ??
+                        document.xml.createElement("way"),
+                    )
+                  : [];
+                const backwards =
+                  member.getAttribute("role") === "backward" ||
+                  prevRefs.includes(refs[refs.length - 1]);
+                rel.insertBefore(
+                  clone,
+                  backwards ? member : member.nextSibling,
+                );
+              }
+            }
+          }
+        };
+
   try {
     switch (command.type) {
+      case "delete-building": {
+        const owner=buildingOwner(document,command.wayId),shapes=buildingShapes(document).filter(s=>s.id===owner.id);if(!shapes.length)throw Error("Выберите здание");
+        const ways=[...new Set(shapes.flatMap(s=>s.wayIds))];
+        if([...document.relations].some(([id,r])=>(owner.type!=="relation"||id!==owner.id)&&childElements(r).some(m=>(m.getAttribute("type")==="way"&&ways.includes(m.getAttribute("ref")!)||owner.type==="relation"&&m.getAttribute("type")==="relation"&&m.getAttribute("ref")===owner.id))))throw Error("Контур используется в другом OSM-отношении. Удаление заблокировано");
+        if(owner.type==="relation"){touch("relation",owner.id);owner.element.remove();document.relations.delete(owner.id);}
+        for(const id of ways){touch("way",id);document.ways.get(id)?.remove();document.ways.delete(id);}break;
+      }
+      case "move-block": {
+        const source=requireElement(document,"node",command.id),tags=tagsOf(source);if(tags.barrier!=="block")throw Error("Выберите блок");
+        const target=pointId(command.point);if(target===command.id)break;
+        const node=requireElement(document,"node",target),t=tagsOf(node);if(t.highway||t.public_transport||t.barrier)throw Error("Целевая точка уже занята объектом карты");
+        setTags("node",target,{barrier:"block",width:tags.width||"1.5",length:tags.length||"1.5",height:tags.height||"1.2",name:tags.name||null});
+        setTags("node",command.id,{barrier:null,width:null,length:null,height:null,name:null});
+        if(![...document.ways.values()].some(w=>refsOf(w).includes(command.id))&&![...document.relations.values()].some(r=>childElements(r).some(m=>m.getAttribute("type")==="node"&&m.getAttribute("ref")===command.id))){touch("node",command.id);source.remove();document.nodes.delete(command.id);}
+        patch.selection={type:"node",id:target};break;
+      }
+      case "create-block": {
+        const id=pointId(command.point),existing=tagsOf(requireElement(document,"node",id));
+        if(existing.highway||existing.public_transport||existing.barrier&&existing.barrier!=="block")throw Error("Здесь уже есть объект карты. Поставьте блок рядом");
+        setTags("node",id,{barrier:"block",width:"1.5",length:"1.5",height:"1.2"});patch.selection={type:"node",id};break;
+      }
+      case "delete-block": {
+        const node=requireElement(document,"node",command.id);if(tagsOf(node).barrier!=="block")throw Error("Это не блок");
+        if([...document.ways.values()].some(w=>refsOf(w).includes(command.id))||[...document.relations.values()].some(r=>childElements(r).some(m=>m.getAttribute("type")==="node"&&m.getAttribute("ref")===command.id)))setTags("node",command.id,{barrier:null,width:null,length:null,height:null});
+        else {touch("node",command.id);node.remove();document.nodes.delete(command.id);}break;
+      }
+      case "set-area-tags": {
+        const element=requireElement(document,command.elementType,command.id),combined={...tagsOf(element),...command.tags};
+        for(const key of ["height","min_height","building:levels","width","length"]){const value=combined[key];if(value&&(!Number.isFinite(Number(value))||Number(value)<0||key!=="min_height"&&Number(value)===0))throw Error("Высота, этажность и размеры должны быть положительными числами");}
+        const height=Number(combined.height)||Number(combined["building:levels"])*3.2||9.6;
+        if(Number(combined.min_height||0)>=height)throw Error("Низ здания должен быть ниже крыши");
+        setTags(command.elementType,command.id,command.tags);break;
+      }
+      case "move-area": {
+        if(!Number.isFinite(command.east)||!Number.isFinite(command.north)||Math.hypot(command.east,command.north)>500)throw Error("Перемещайте здание не более чем на 500 м за один шаг");
+        const owner=buildingOwner(document,command.wayId),shapes=buildingShapes(document).filter(s=>s.id===owner.id),ids=[...new Set(shapes.flatMap(s=>[...s.outerRefs,...s.holeRefs.flat()]))];
+        if(!ids.length)throw Error("Выберите здание");
+        const members=new Set(shapes.flatMap(s=>s.wayIds));
+        if([...document.ways].some(([id,w])=>!members.has(id)&&refsOf(w).some(ref=>ids.includes(ref))))throw Error("Контур имеет общие узлы с другим объектом. Перемещайте нужные вершины отдельно");
+        const projection=createProjection(coordinateOf(requireElement(document,"node",ids[0])));
+        for(const id of ids){const node=requireElement(document,"node",id),p=projection.project(coordinateOf(node)),c=projection.unproject({x:p.x+command.east,z:p.z+command.north});touch("node",id);node.setAttribute("lat",c.lat.toFixed(9));node.setAttribute("lon",c.lon.toFixed(9));}patch.selection={type:"way",id:command.wayId};break;
+      }
+      case "create-building":
+      case "add-courtyard": {
+        if(command.points.length<3)throw Error("Для контура нужны минимум три точки");
+        const points=command.points.map(p=>{checkCoordinate(p);return p;});
+        if(new Set(points.map(p=>`${p.lat}/${p.lon}`)).size<3)throw Error("Нужны три разные вершины");
+        let owner:ReturnType<typeof buildingOwner>|undefined;
+        if(command.type==="add-courtyard") {
+          owner=buildingOwner(document,command.wayId);const projection=createProjection(points[0]),shape=buildingShapes(document,projection).find(s=>s.id===owner!.id);
+          if(!shape||points.some(p=>!shapeContains(shape,projection.project(p))))throw Error("Двор должен находиться внутри выбранного здания и не пересекать другой двор");
+          const ring=points.map(p=>projection.project(p));for(let i=0;i<ring.length;i++)for(const boundary of [shape.outer,...shape.holes])for(let j=0;j<boundary.length;j++)if(segmentCrossing(ring[i],ring[(i+1)%ring.length],boundary[j],boundary[(j+1)%boundary.length])!==null)throw Error("Контур двора не должен пересекать стены здания или другого двора");
+        }
+        const refs=points.map(p=>pointId(p));refs.push(refs[0]);const way=newElement("way"),id=way.getAttribute("id")!;
+        for(const ref of refs){const nd=document.xml.createElement("nd");nd.setAttribute("ref",ref);way.appendChild(nd);}
+        if(command.type==="create-building"){setTags("way",id,{building:"yes",height:"9.6",...command.tags});patch.selection={type:"way",id};}
+        else {
+          let relation=owner!.type==="relation"?owner!.element:newElement("relation");
+          if(owner!.type==="way") {
+            const tags=tagsOf(owner!.element),updates:Record<string,string|null>={};for(const [key,value] of Object.entries(tags))if(key==="building"||key.startsWith("building:")||["name","height","min_height","roof:shape","roof:height"].includes(key))updates[key]=value;
+            setTags("relation",relation.getAttribute("id")!,{...updates,type:"multipolygon"});setTags("way",owner!.id,Object.fromEntries(Object.keys(updates).map(k=>[k,null])));
+            const outer=document.xml.createElement("member");outer.setAttribute("type","way");outer.setAttribute("ref",owner!.id);outer.setAttribute("role","outer");relation.appendChild(outer);
+          } else touch("relation",owner!.id);
+          const inner=document.xml.createElement("member");inner.setAttribute("type","way");inner.setAttribute("ref",id);inner.setAttribute("role","inner");relation.appendChild(inner);patch.selection={type:"way",id:command.wayId};
+        }break;
+      }
+      case "mark-building-passage": {
+        const {width,height}=command;if(!Number.isFinite(width)||!Number.isFinite(height)||width<2||height<2.2||width>30||height>15)throw Error("Укажите реальную ширину от 2 м и высоту от 2,2 м");
+        const source=requireElement(document,"way",command.wayId),tags=tagsOf(source);if(!tags.highway)throw Error("Выберите дорогу через здание");
+        const refs=refsOf(source),projection=createProjection(coordinateOf(requireElement(document,"node",refs[0]))),shape=buildingShapes(document,projection).find(s=>s.id===command.buildingId);
+        if(!shape)throw Error("Контур здания не найден");
+        const buildingHeight=Number.parseFloat(shape.tags.height)||Number(shape.tags["building:levels"])*3.2||9.6;
+        if(height>=buildingHeight)throw Error("Высота арки должна быть ниже крыши здания. Если контура на самом деле нет, исправьте здание или нарисуйте двор");
+        const expanded=[refs[0]],cutNodes=new Set<string>();let intersects=false;
+        for(let i=1;i<refs.length;i++){
+          const a=projection.project(coordinateOf(requireElement(document,"node",refs[i-1]))),b=projection.project(coordinateOf(requireElement(document,"node",refs[i])));
+          const cuts=[0,1];for(const ring of [shape.outer,...shape.holes])for(let j=0;j<ring.length;j++){const t=segmentCrossing(a,b,ring[j],ring[(j+1)%ring.length]);if(t!==null){cuts.push(t);if(t<1e-7)cutNodes.add(refs[i-1]);if(t>1-1e-7)cutNodes.add(refs[i]);}}
+          const sorted=[...new Set(cuts.map(t=>Math.round(t*1e8)/1e8))].sort((a,b)=>a-b);
+          for(let j=1;j<sorted.length;j++){
+            const t=sorted[j],prev=sorted[j-1],mid=(t+prev)/2,inside=shapeContains(shape,{x:a.x+(b.x-a.x)*mid,z:a.z+(b.z-a.z)*mid});if(inside)intersects=true;
+            let id=refs[i];if(t<1-1e-7){const c=projection.unproject({x:a.x+(b.x-a.x)*t,z:a.z+(b.z-a.z)*t});id=pointId(c);cutNodes.add(id);}expanded.push(id);
+          }
+        }
+        if(!intersects)throw Error("Выбранная дорога не проходит через стены этого здания. Для двора используйте внутренний контур");
+        touch("way",command.wayId);for(const nd of childElements(source).filter(c=>c.tagName==="nd"))nd.remove();const before=source.firstElementChild;
+        for(const ref of expanded){const nd=document.xml.createElement("nd");nd.setAttribute("ref",ref);source.insertBefore(nd,before);}
+        let parts=[command.wayId];for(const node of cutNodes){const part=parts.find(id=>{const refs=refsOf(requireElement(document,"way",id));return refs.indexOf(node)>0&&refs.indexOf(node)<refs.length-1;});if(!part)continue;const pieces=new Map<string,string[]>();splitWay(part,node,pieces);parts=parts.flatMap(id=>id===part?pieces.get(part)??[part]:[id]);}
+        for(const id of parts){const w=requireElement(document,"way",id),ids=refsOf(w);let inside=false;for(let i=1;i<ids.length;i++){const a=projection.project(coordinateOf(requireElement(document,"node",ids[i-1]))),b=projection.project(coordinateOf(requireElement(document,"node",ids[i])));if(shapeContains(shape,{x:(a.x+b.x)/2,z:(a.z+b.z)/2}))inside=true;}
+          if(inside){setTags("way",id,{tunnel:"building_passage",covered:"yes",layer:"0",width:String(width),maxwidth:String(width),maxheight:String(height),maxspeed:"20",...(width<5?{lanes:"1","lanes:forward":null,"lanes:backward":null,"lanes:both_ways":null}:{} )});patch.selection={type:"way",id};}
+        }break;
+      }
+      case "disconnect-lanes": {
+        const relation=requireElement(document,"relation",command.id);if(tagsOf(relation).type!=="connectivity")throw Error("Это не связь полос");
+        const remaining=parseConnectivity(tagsOf(relation).connectivity||"").filter(p=>p.from!==command.from||p.to!==command.to);
+        if(remaining.length)setTags("relation",command.id,{connectivity:formatConnectivity(remaining)});
+        else {touch("relation",command.id);relation.remove();document.relations.delete(command.id);}break;
+      }
       case "delete-turn-restriction": {
         const relation = requireElement(document, "relation", command.id);
         if (tagsOf(relation).type !== "restriction")
@@ -250,9 +481,11 @@ export function applyEdit(
         document.relations.delete(command.id);
         break;
       }
+      case "connect-lanes":
       case "set-turn-restriction": {
-        const { fromWay, toWay, via, fromNode, toNode, restriction } = command;
-        if (!restrictionNames[restriction])
+        const { fromWay, toWay, via, fromNode, toNode } = command;
+        const restriction=command.type === "set-turn-restriction"?command.restriction:"";
+        if (restriction && !restrictionNames[restriction])
           throw Error("Выберите тип запрещающего или предписывающего знака");
         const from = requireElement(document, "way", fromWay),
           to = requireElement(document, "way", toWay);
@@ -306,131 +539,13 @@ export function applyEdit(
               : angle > 0
                 ? "left_turn"
                 : "right_turn";
-        if (!restriction.endsWith(move))
+        if (restriction && !restriction.endsWith(move))
           throw Error(
             "Выбранный выезд не соответствует знаку. Выберите правильное направление на перекрёстке",
           );
         const pieces = new Map<string, string[]>();
-        const split = (wayId: string) => {
-          const way = requireElement(document, "way", wayId),
-            refs = refsOf(way),
-            at = refs.indexOf(via);
-          if (at < 1 || at === refs.length - 1) return;
-          if (refs.lastIndexOf(via) !== at || refs[0] === refs[refs.length - 1])
-            throw Error(
-              "Сначала разделите замкнутую дорогу на обычные участки",
-            );
-          const relations = Array.from(document.relations.values()).filter(
-            (rel) =>
-              childElements(rel).some(
-                (m) =>
-                  m.tagName === "member" &&
-                  m.getAttribute("type") === "way" &&
-                  m.getAttribute("ref") === wayId,
-              ),
-          );
-          for (const rel of relations) {
-            const t = tagsOf(rel);
-            if (!["route", "restriction"].includes(t.type))
-              throw Error(
-                "Разделение дороги затронет сложное OSM-отношение. Выберите уже разделённый подъезд",
-              );
-            if (
-              t.type === "restriction" &&
-              childElements(rel).some(
-                (m) =>
-                  m.getAttribute("role") === "via" &&
-                  m.getAttribute("type") === "way" &&
-                  m.getAttribute("ref") === wayId,
-              )
-            )
-              throw Error(
-                "Дорога уже является via-way ограничения. Выберите другой подъезд",
-              );
-            if (
-              t.type === "restriction" &&
-              childElements(rel).some(
-                (m) =>
-                  m.getAttribute("role") === "via" &&
-                  m.getAttribute("ref") === via,
-              )
-            )
-              throw Error(
-                "На этом подъезде уже есть неоднозначное ограничение; сначала удалите его",
-              );
-          }
-          const fresh = newElement("way"),
-            newId = fresh.getAttribute("id")!;
-          pieces.set(wayId, [wayId, newId]);
-          for (const child of childElements(way).filter(
-            (c) => c.tagName !== "nd",
-          ))
-            fresh.appendChild(child.cloneNode(true));
-          const write = (element: Element, ids: string[]) => {
-            for (const n of childElements(element).filter(
-              (c) => c.tagName === "nd",
-            ))
-              n.remove();
-            const before = element.firstElementChild;
-            for (const ref of ids) {
-              const nd = document.xml.createElement("nd");
-              nd.setAttribute("ref", ref);
-              element.insertBefore(nd, before);
-            }
-          };
-          touch("way", wayId);
-          write(way, refs.slice(0, at + 1));
-          write(fresh, refs.slice(at));
-          for (const rel of relations) {
-            touch("relation", rel.getAttribute("id")!);
-            const members = childElements(rel).filter(
-              (m) => m.tagName === "member",
-            );
-            for (const member of members.filter(
-              (m) =>
-                m.getAttribute("type") === "way" &&
-                m.getAttribute("ref") === wayId,
-            )) {
-              if (tagsOf(rel).type === "restriction") {
-                const viaId = members
-                  .find(
-                    (m) =>
-                      m.getAttribute("role") === "via" &&
-                      m.getAttribute("type") === "node",
-                  )
-                  ?.getAttribute("ref");
-                if (!viaId)
-                  throw Error(
-                    "Не удалось безопасно обновить существующее ограничение поворота",
-                  );
-                if (refs.slice(at + 1).includes(viaId))
-                  member.setAttribute("ref", newId);
-              } else {
-                const clone = member.cloneNode(true) as Element;
-                clone.setAttribute("ref", newId);
-                const before = members
-                  .slice(0, members.indexOf(member))
-                  .reverse()
-                  .find((m) => m.getAttribute("type") === "way");
-                const prevRefs = before
-                  ? refsOf(
-                      document.ways.get(before.getAttribute("ref")!) ??
-                        document.xml.createElement("way"),
-                    )
-                  : [];
-                const backwards =
-                  member.getAttribute("role") === "backward" ||
-                  prevRefs.includes(refs[refs.length - 1]);
-                rel.insertBefore(
-                  clone,
-                  backwards ? member : member.nextSibling,
-                );
-              }
-            }
-          }
-        };
-        split(fromWay);
-        if (toWay !== fromWay) split(toWay);
+        splitWay(fromWay,via,pieces);
+        if (toWay !== fromWay) splitWay(toWay,via,pieces);
         const segment = (original: string, neighbor: string) =>
           Array.from(document.ways).find(([id, w]) => {
             if (!(pieces.get(original) ?? [original]).includes(id))
@@ -446,6 +561,20 @@ export function applyEdit(
           toId = segment(toWay, toNode);
         if (!fromId || !toId)
           throw Error("Не удалось определить подъезд после разделения дороги");
+        if(command.type === "connect-lanes") {
+          const fromTags=tagsOf(requireElement(document,"way",fromId)),toTags=tagsOf(requireElement(document,"way",toId));
+          const fromRefs=refsOf(requireElement(document,"way",fromId)),toRefs=refsOf(requireElement(document,"way",toId));
+          const fromLayout=drivingLanes(fromTags,roadStyle(fromTags).lanes,command.drivingSide),toLayout=drivingLanes(toTags,roadStyle(toTags).lanes,command.drivingSide);
+          const incoming=fromRefs.indexOf(fromNode)<fromRefs.indexOf(via)?fromLayout.forward:fromLayout.backward;
+          const outgoing=toRefs.indexOf(toNode)>toRefs.indexOf(via)?toLayout.forward:toLayout.backward;
+          if(!incoming.includes(command.fromLane)||!outgoing.includes(command.toLane))throw Error("Выбранная полоса направлена против движения. Выберите полосу правильного направления");
+          const a=laneTagInfo(fromTags,roadStyle(fromTags).lanes,command.fromLane,command.drivingSide)!,b=laneTagInfo(toTags,roadStyle(toTags).lanes,command.toLane,command.drivingSide)!;
+          if(!new TurnRules(document).allowed({wayId:fromId,from:fromNode,to:via},{wayId:toId,from:via,to:toNode},[fromId]))throw Error("Соединение полос противоречит установленному запрету поворота");
+          let relation=[...document.relations.values()].find(rel=>tagsOf(rel).type==="connectivity"&&[["from",fromId],["via",via],["to",toId]].every(([role,ref])=>childElements(rel).some(m=>m.getAttribute("role")===role&&m.getAttribute("ref")===ref)));
+          if(!relation){relation=newElement("relation");for(const [role,type,ref] of [["from","way",fromId],["via","node",via],["to","way",toId]]){const m=document.xml.createElement("member");m.setAttribute("role",role);m.setAttribute("type",type);m.setAttribute("ref",ref);relation.appendChild(m);}}
+          setTags("relation",relation.getAttribute("id")!,{type:"connectivity",connectivity:formatConnectivity([...parseConnectivity(tagsOf(relation).connectivity||""),{from:a.index+1,to:b.index+1}])});
+          patch.selection={type:"way",id:fromId};break;
+        }
         for (const rel of document.relations.values()) {
           if (tagsOf(rel).type !== "restriction") continue;
           const members = childElements(rel);
@@ -895,8 +1024,8 @@ export function applyEdit(
         break;
       }
       case "insert-node": {
-        const id = insert(command.wayId, command.index, command.point);
-        patch.selection = { type: "node", id };
+        insert(command.wayId, command.index, command.point);
+        patch.selection = { type: "way", id:command.wayId };
         break;
       }
       case "remove-vertex": {
@@ -908,6 +1037,8 @@ export function applyEdit(
           command.index >= refs.length
         )
           throw new Error("Вершина не найдена");
+        const closed=refs[0]===refs[refs.length-1];
+        if(closed&&refs.length<=4)throw Error("В замкнутом контуре должны остаться минимум три вершины");
         if (refs.length <= 2)
           throw new Error("В дороге должны остаться минимум две вершины");
         const id = refs[command.index];
@@ -935,9 +1066,9 @@ export function applyEdit(
         )
           throw new Error("Узел используется в отношении");
         touch("way", command.wayId);
-        childElements(way)
-          .filter((child) => child.tagName === "nd")
-          [command.index].remove();
+        const nds=childElements(way).filter(child=>child.tagName==="nd");
+        if(closed&&(command.index===0||command.index===refs.length-1)){nds[0].remove();nds[nds.length-1].setAttribute("ref",refs[1]);}
+        else nds[command.index].remove();
         break;
       }
       case "delete-way": {

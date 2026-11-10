@@ -1,3 +1,4 @@
+import { buildingShapes } from "../core/osm/buildingShapes";
 import { buildRestrictionSigns } from "./geometry/restrictionSigns";
 import {
   ArcRotateCamera,
@@ -30,7 +31,7 @@ import {
   smoothRoadPoints,
 } from "./geometry/roads";
 import { TrafficModel } from "./TrafficModel";
-import { buildBuilding } from "./geometry/buildings";
+import { buildBuilding, type PassageCut } from "./geometry/buildings";
 import { buildSignal } from "./geometry/signals";
 import type { useEditorStore } from "../stores/editor";
 
@@ -41,6 +42,7 @@ export class SceneManager {
   private document: OsmDocument | null = null;
   private projection = createProjection({ lat: 52.26, lon: 104.26 });
   private wayMeshes = new Map<string, Mesh[]>();
+  private buildingMeshes:Mesh[]=[];
   private signalMeshes = new Map<string, Mesh[]>();
   private junctionCounts = new Map<string, number>();
   private handles: Mesh[] = [];
@@ -49,6 +51,7 @@ export class SceneManager {
   private preview: Mesh | null = null;
   private routePreview: Mesh | null = null;
   private laneHighlight: Mesh | null = null;
+  private laneLinkPreview: Mesh | null = null;
   private traffic: TrafficModel | null = null;
   private vehicleMeshes = new Map<string, Mesh>();
   private vehicleHeadings = new Map<string, number>();
@@ -217,6 +220,7 @@ export class SceneManager {
     this.camera.setTarget(Vector3.Zero());
     this.camera.radius = 1550;
     this.setView();
+    this.refreshBuildings();
     this.refreshSelection();
     this.refreshIssues();
     this.visibility();
@@ -279,19 +283,22 @@ export class SceneManager {
         ),
       );
     }
-    if (tags.building && tags.building !== "no") {
-      const building = buildBuilding(
-        id,
-        points,
-        tags,
-        this.scene,
-        this.materials.building,
-      );
-      if (building) meshes.push(building);
-    }
     if (meshes.length) this.wayMeshes.set(id, meshes);
   }
 
+  private refreshBuildings() {
+    this.buildingMeshes.forEach(mesh=>mesh.dispose());this.buildingMeshes=[];if(!this.document)return;
+    const passages:PassageCut[]=[];
+    for(const way of this.document.ways.values())if(tagsOf(way).tunnel==="building_passage") {
+      const tags=tagsOf(way),points=refsOf(way).map(id=>this.point(id)).filter((p):p is Vector3=>!!p);
+      for(let i=1;i<points.length;i++)passages.push({a:points[i-1],b:points[i],width:roadStyle(tags).width,height:Number.parseFloat(tags.maxheight)||2.7});
+    }
+    for(const shape of buildingShapes(this.document,this.projection)){
+      const points=shape.outer.map(p=>new Vector3(p.x,0,p.z)),holes=shape.holes.map(r=>r.map(p=>new Vector3(p.x,0,p.z)));
+      const mesh=buildBuilding(shape.id+":"+shape.outerWay,points,shape.tags,this.scene,this.materials.building,holes,passages);
+      if(mesh){mesh.metadata={role:"building",type:"way",id:shape.outerWay,wayIds:shape.wayIds};this.buildingMeshes.push(mesh);}
+    }
+  }
   private refreshSignal(id: string) {
     this.signalMeshes.get(id)?.forEach((mesh) => mesh.dispose());
     this.signalMeshes.delete(id);
@@ -302,6 +309,10 @@ export class SceneManager {
     const signal = nodeTags.highway === "traffic_signals";
     const busStop =
       nodeTags.public_transport === "stop_position" && nodeTags.bus === "yes";
+    if(nodeTags.barrier === "block"){
+      const width=Math.max(.3,Math.min(30,Number(nodeTags.width)||1.5)),depth=Math.max(.3,Math.min(30,Number(nodeTags.length)||1.5)),height=Math.max(.2,Math.min(20,Number(nodeTags.height)||1.2));
+      const mesh=MeshBuilder.CreateBox(`block:${id}`,{width,depth,height},this.scene);mesh.position=point.add(new Vector3(0,height/2,0));mesh.material=this.materials.pole;mesh.metadata={role:"block",type:"node",id};this.signalMeshes.set(id,[mesh]);return;
+    }
     if (!signal && !busStop) return;
     const way = Array.from(this.document!.ways.values()).find(
       (way) => tagsOf(way).highway && refsOf(way).includes(id),
@@ -363,9 +374,11 @@ export class SceneManager {
           if (this.signalMeshes.has(ref)) nodes.add(ref);
     }
     for (const id of nodes) this.refreshSignal(id);
+    this.refreshBuildings();
     this.refreshSelection();
     this.refreshIssues();
     this.resetTrafficAfterEdit();
+    this.refreshSelection();
     this.visibility();
   }
 
@@ -605,12 +618,21 @@ export class SceneManager {
   }
 
   refreshSelection() {
+    this.laneLinkPreview?.dispose();this.laneLinkPreview=null;
+    if(this.store.selection?.type==="way"&&this.traffic){
+      const lines=this.traffic.connectionPaths(this.store.selection.id,this.store.selectedLane).map(path=>{
+        const a=new Vector3(path.start.x,path.start.y+.2,path.start.z),b=new Vector3(path.end.x,path.end.y+.2,path.end.z),c=new Vector3(path.via.x,Math.max(a.y,b.y),path.via.z);
+        return Array.from({length:17},(_,i)=>{const t=i/16;return a.scale((1-t)**2).add(c.scale(2*t*(1-t))).add(b.scale(t*t));});
+      });
+      if(lines.length){const mesh=MeshBuilder.CreateLineSystem("lane-connections",{lines},this.scene);mesh.color=Color3.FromHexString("#8757d6");mesh.isPickable=false;this.laneLinkPreview=mesh;}
+    }
     this.laneHighlight?.dispose();
     this.laneHighlight = null;
     this.handles.forEach((mesh) => mesh.dispose());
     this.handles = [];
     if (!this.document) return;
     const selected = this.store.selection;
+    for(const mesh of this.buildingMeshes)mesh.material=selected?.type === "way"&&mesh.metadata.wayIds?.includes(selected.id)?this.materials.selected:this.materials.building;
     const problemWays = new Map(
       this.store.graphIssues
         .filter((i) => i.elementType === "way" && i.id)
@@ -674,7 +696,8 @@ export class SceneManager {
         : selected
           ? [selected.id]
           : [];
-    const elevation =
+    const selectedBuilding=selected?.type === "way"?this.buildingMeshes.find(m=>m.metadata.wayIds?.includes(selected.id)):undefined;
+    const elevation = selectedBuilding ? selectedBuilding.getBoundingInfo().boundingBox.maximumWorld.y :
       selected?.type === "way" && this.document.ways.has(selected.id)
         ? roadStyle(tagsOf(this.document.ways.get(selected.id)!)).elevation
         : 0;
@@ -700,6 +723,7 @@ export class SceneManager {
   }
 
   visibility() {
+    for(const mesh of this.buildingMeshes)mesh.setEnabled(this.store.buildings);
     for (const mesh of this.issueMeshes)
       mesh.setEnabled(this.store.showGraphIssues);
     for (const mesh of this.vehicleMeshes.values())
@@ -929,10 +953,13 @@ export class SceneManager {
             })(),
     );
     if (cursor) points.push(cursor);
+    if (["building", "courtyard"].includes(this.store.tool) && points.length >= 3) points.push(points[0]);
+    const owner = this.store.tool === "courtyard" ? buildingShapes(this.document!, this.projection).find(s => s.wayIds.includes(this.store.courtyardOwner || "")) : null;
+    const previewHeight = owner ? (Number.parseFloat(owner.tags.height) || Number(owner.tags["building:levels"]) * 3.2 || 9.6) + .8 : .7;
     if (points.length > 1) {
       const preview = MeshBuilder.CreateLines(
         "draft",
-        { points: points.map((point) => point.add(new Vector3(0, 0.7, 0))) },
+        { points: points.map((point) => new Vector3(point.x, previewHeight, point.z)) },
         this.scene,
       );
       preview.color = Color3.FromHexString("#97ffb9");
@@ -994,7 +1021,7 @@ export class SceneManager {
         (mesh) =>
           mesh.metadata?.role === "handle" ||
           mesh.metadata?.role === "signal" ||
-          mesh.metadata?.role === "stop",
+          mesh.metadata?.role === "stop" || mesh.metadata?.role === "block",
       );
       if (pick?.pickedMesh && this.store.tool === "move") {
         const mesh = pick.pickedMesh as Mesh;
@@ -1025,7 +1052,7 @@ export class SceneManager {
           this.drag.point = ray.origin.add(ray.direction.scale(distance));
           this.drag.mesh.position.copyFrom(this.drag.point);
         }
-      } else if (this.store.tool === "draw") {
+      } else if (["draw","building","courtyard"].includes(this.store.tool)) {
         const point = this.groundPoint();
         if (point) this.refreshPreview(point);
       }
@@ -1035,11 +1062,8 @@ export class SceneManager {
       const { id, point } = this.drag;
       this.drag = null;
       this.camera.attachControl(this.canvas, true);
-      const patch = this.store.execute({
-        type: "move-node",
-        id,
-        coordinate: this.projection.unproject(point),
-      });
+      let target=this.snap(point);if("nodeId" in target&&target.nodeId===id)target=this.projection.unproject(point);
+      const patch = tagsOf(this.document.nodes.get(id)!).barrier === "block"?this.store.execute({type:"move-block",id,point:target}):this.store.execute({type:"move-node",id,coordinate:this.projection.unproject(point)});
       if (!patch) {
         this.refreshSelection();
         this.refreshSignal(id);
@@ -1051,7 +1075,7 @@ export class SceneManager {
       Math.hypot(event.clientX - this.down.x, event.clientY - this.down.y) > 5
     )
       return;
-    const roadOnly = ["lane", "car", "bus-stop"].includes(this.store.tool);
+    const roadOnly = ["lane", "car", "bus-stop", "signal"].includes(this.store.tool);
     const routeOnly = this.store.tool === "bus-route";
     const joinOnly = this.store.tool === "join";
     const pick = this.scene.pick(
@@ -1070,7 +1094,7 @@ export class SceneManager {
                   "signal",
                   "stop",
                   "issue",
-                  "vehicle",
+                  "vehicle", "building", "block",
                 ].includes(mesh.metadata?.role),
     );
     const metadata = pick?.pickedMesh?.metadata;
@@ -1165,6 +1189,12 @@ export class SceneManager {
         }
       }
       return;
+    }
+    if (this.store.tool === "block") {
+      const point=this.groundPoint();if(point)this.store.execute({type:"create-block",point:this.snap(point)});return;
+    }
+    if (["building","courtyard"].includes(this.store.tool)) {
+      const point=this.groundPoint();if(point){this.store.draft.push(this.projection.unproject(point));this.refreshPreview();}return;
     }
     if (this.store.tool === "draw") {
       const point = this.groundPoint();

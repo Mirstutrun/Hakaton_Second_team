@@ -216,6 +216,12 @@ onBeforeUnmount(() => manager?.dispose());
       <div class="spinner"></div>
       Подготовка дорожной сети…
     </div>
+    <div v-if="['building','courtyard'].includes(store.tool)" class="draw-card">
+      <span>{{store.tool === 'courtyard'?'Контур двора':'Контур здания'}} · {{store.draft.length}} точек</span>
+      <button class="primary" :disabled="store.draft.length<3" @click="store.finishArea()">Завершить ↵</button>
+      <button :disabled="!store.draft.length" @click="store.draft.pop()">Убрать последнюю</button>
+      <button @click="store.draft=[];store.tool='select'">Отмена</button>
+    </div>
     <div v-if="store.tool === 'draw'" class="draw-card">
       <span
         >Новая дорога <b>{{ store.draft.length }} точек</b></span

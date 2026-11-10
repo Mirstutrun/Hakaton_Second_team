@@ -1,7 +1,6 @@
 import { networkConnectivity } from "../core/osm/connectivity";
 import { computed, markRaw, ref, shallowRef } from "vue";
 import { defineStore } from "pinia";
-import { reviewBaseline, reviewReport } from "../core/osm/reviewReport";
 import { parseOsm } from "../core/osm/parser";
 import { serializeOsm } from "../core/osm/serializer";
 import { applyEdit, applyPatch, type EditCommand } from "../core/osm/commands";
@@ -22,7 +21,6 @@ import { TrafficModel } from "../engine/TrafficModel";
 import type { EditorTool } from "../editor/tools";
 
 export const useEditorStore = defineStore("editor", () => {
-  let baseline: ReturnType<typeof reviewBaseline> | null = null;
   const document = shallowRef<OsmDocument | null>(null);
   const revision = ref(0);
   const lastPatch = shallowRef<EditPatch | null>(null);
@@ -64,6 +62,8 @@ export const useEditorStore = defineStore("editor", () => {
   const focusRequest = ref(0);
   const focusCoordinate = ref<Coordinate | null>(null);
   const draft = ref<RoadPoint[]>([]);
+  const courtyardOwner=ref("");
+  const passageProposal=ref<{wayId:string;buildingId:string}|null>(null);
   const joinSource = ref<{ wayId: string; nodeId: string } | null>(null);
   const history = shallowRef<EditPatch[]>([]);
   const cursor = ref(0);
@@ -179,7 +179,6 @@ export const useEditorStore = defineStore("editor", () => {
         (issue) => issue.severity === "error",
       );
       if (errors.length) throw new Error(errors[0].message);
-      baseline = reviewBaseline(next);
       document.value = markRaw(next);
       fileName.value = name;
       history.value = [];
@@ -188,6 +187,7 @@ export const useEditorStore = defineStore("editor", () => {
       selectedVertex.value = null;
       selectedLane.value = null;
       selectedVehicle.value = null;
+      passageProposal.value=null;courtyardOwner.value="";
       vehicleCount.value = 0;
       busCount.value = 0;
       selectedBusRoute.value = "";
@@ -280,25 +280,12 @@ export const useEditorStore = defineStore("editor", () => {
     }
   }
 
-  function exportReviewReport() {
-    if (!document.value || !baseline) return;
-    const report = {
-      source: fileName.value,
-      ...reviewReport(baseline, document.value),
-      edits: history.value.slice(0, cursor.value).map((patch) => patch.label),
-    };
-    const url = URL.createObjectURL(
-      new Blob([JSON.stringify(report, null, 2)], { type: "application/json" }),
-    );
-    const link = window.document.createElement("a");
-    link.href = url;
-    link.download =
-      fileName.value.replace(/\.(osm|xml)$/i, "") + "-before-after.json";
-    link.click();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
-    message.value = "Отчёт до/после экспортирован";
+  function finishArea() {
+    if(!document.value)return;
+    const points=draft.value.map(p=>"nodeId" in p?coordinateOf(document.value!.nodes.get(p.nodeId)!):"wayId" in p?p.coordinate:p);
+    const result=tool.value === "courtyard"?execute({type:"add-courtyard",wayId:courtyardOwner.value,points}):execute({type:"create-building",points,tags:{building:"yes"}});
+    if(result){draft.value=[];tool.value="select";inspectorOpen.value=true;courtyardOwner.value="";}
   }
-
   function finishRoad() {
     if (
       execute({
@@ -420,8 +407,8 @@ export const useEditorStore = defineStore("editor", () => {
     undo,
     redo,
     exportOsm,
-    exportReviewReport,
     finishRoad,
+    finishArea, courtyardOwner, passageProposal,
     selectOsmElement,
     addRouteStop,
     finishBusRoute,

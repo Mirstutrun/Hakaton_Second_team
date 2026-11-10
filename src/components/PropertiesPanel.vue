@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import BuildingProperties from "./BuildingProperties.vue";
+import { buildingOwner } from "../core/osm/buildingShapes";
+import LaneConnectionsPanel from "./LaneConnectionsPanel.vue";
 import TurnRestrictionsPanel from "./TurnRestrictionsPanel.vue";
 import { computed, reactive, ref, watch } from "vue";
 import { coordinateOf, refsOf, tagsOf } from "../core/osm/model";
@@ -13,7 +16,8 @@ const tags = computed(() => {
   store.revision;
   return store.selected ? tagsOf(store.selected) : {};
 });
-const isRoad = computed(() => store.selection?.type === "way");
+const isArea=computed(()=>{store.revision;if(store.selection?.type === "node")return tags.value.barrier === "block";if(store.selection?.type!=="way"||!store.document)return false;const owner=buildingOwner(store.document,store.selection.id);const t=owner.element?tagsOf(owner.element):{};return !!(t.building&&t.building!=="no"||t["building:part"]&&t["building:part"]!=="no");});
+const isRoad = computed(() => store.selection?.type === "way" && !!tags.value.highway);
 const isSignal = computed(() => tags.value.highway === "traffic_signals");
 const isStop = computed(
   () =>
@@ -207,6 +211,8 @@ function removeVertex() {
       </button>
     </div>
     <template v-if="store.selected">
+      <BuildingProperties v-if="isArea" />
+      <template v-else>
       <h2>
         {{
           isRoad
@@ -252,6 +258,7 @@ function removeVertex() {
             {{ i }}
           </button>
         </div>
+        <LaneConnectionsPanel v-if="laneInfo" />
         <form v-if="laneInfo" class="lane-settings" @submit.prevent="applyLane">
           <p class="field-hint">
             Полоса {{ store.selectedLane! + 1 }} · {{ laneInfo.direction }}
@@ -656,6 +663,7 @@ function removeVertex() {
           </button>
         </div>
       </details>
+      </template>
     </template>
     <div v-else class="empty-inspector">
       <div class="empty-icon">⌖</div>

@@ -54,6 +54,7 @@ const groups = computed<{ title: string; tools: EditorTool[] }[]>(() =>
             title: "Изменить сеть",
             tools: ["draw", "join", "move", "insert", "signal"],
           },
+          {title:"Здания и препятствия",tools:["building","block"]},
         ],
 );
 function choose(id: EditorTool) {

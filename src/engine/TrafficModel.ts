@@ -1,3 +1,5 @@
+import { obstacleFilter } from "../core/osm/obstacles";
+import { LaneConnections } from "../core/osm/laneConnectivity";
 import { TurnRules } from "../core/osm/turnRestrictions";
 import {
   createProjection,
@@ -32,6 +34,9 @@ export interface TrafficEdge {
   speed: number;
   oneway: boolean;
   laneIndices: number[];
+  laneNumbers: number[];
+  maxHeight: number;
+  maxWidth: number;
   reverse: boolean;
 }
 export interface TrafficVehicle {
@@ -74,13 +79,17 @@ export class TrafficModel {
   private nextId = 1;
   private seconds = 0;
   private readonly turnRules: TurnRules;
+  private readonly laneLinks: LaneConnections;
+  private readonly pathLanes=new WeakMap<TrafficEdge[],number[]>();
 
   constructor(
     document: OsmDocument,
     readonly drivingSide: DrivingSide = "left",
   ) {
     this.turnRules = new TurnRules(document);
+    this.laneLinks = new LaneConnections(document);
     const projection = createProjection(documentOrigin(document));
+    const blocked=obstacleFilter(document,projection);
     for (const [id, node] of document.nodes)
       if (tagsOf(node).highway === "traffic_signals") this.signals.add(id);
     for (const [wayId, way] of document.ways) {
@@ -99,13 +108,17 @@ export class TrafficModel {
       const oneWay = direction !== 0;
       const layout = drivingLanes(tags, style.lanes, drivingSide);
       const speed = speedMetersPerSecond(tags);
+      const maxHeight=Number.parseFloat(tags.maxheight)||Infinity,maxWidth=Number.parseFloat(tags.maxwidth)||Infinity;
+      if(maxHeight<1.8||maxWidth<1.9)continue;
+      const laneNumbers=(indices:number[],reverse:boolean)=>{const ordered=[...indices].sort((a,b)=>reverse?a-b:b-a);return indices.map(i=>ordered.indexOf(i)+1);};
       const refs = refsOf(way);
       for (let i = 1; i < refs.length; i++) {
         const first = document.nodes.get(refs[i - 1]);
         const last = document.nodes.get(refs[i]);
-        if (!first || !last) continue;
+        if (!first || !last || tagsOf(first).barrier === "block" || tagsOf(last).barrier === "block") continue;
         const a = projection.project(coordinateOf(first));
         const b = projection.project(coordinateOf(last));
+        if(blocked(a,b))continue;
         const length = Math.hypot(b.x - a.x, b.z - a.z);
         if (!Number.isFinite(length) || length < 1.0) continue;
         const forward = (): TrafficEdge => ({
@@ -116,6 +129,7 @@ export class TrafficModel {
           b,
           length,
           laneIndices: layout.forward,
+          laneNumbers:laneNumbers(layout.forward,false),maxHeight,maxWidth,
           reverse: false,
           lanes: Math.max(1, style.lanes),
           width: style.width,
@@ -131,6 +145,7 @@ export class TrafficModel {
           b: a,
           length,
           laneIndices: layout.backward,
+          laneNumbers:laneNumbers(layout.backward,true),maxHeight,maxWidth,
           reverse: true,
           lanes: Math.max(1, style.lanes),
           width: style.width,
@@ -144,23 +159,24 @@ export class TrafficModel {
     }
     for (const route of busRoutes(document)) {
       const legs: TrafficEdge[][] = [];
+      let routeLane=0;
       for (let i = 1; i < route.stops.length; i++) {
         const previous = legs.flat();
         const path = this.shortestPath(
           route.stops[i - 1],
           route.stops[i],
           previous,
-          "bus",
+          "bus",routeLane,
         );
         if (!path.length) break;
-        legs.push(path);
+        legs.push(path);routeLane=this.pathLanes.get(path)?.at(-1)??0;
       }
       if (legs.length !== route.stops.length - 1) continue;
       const returnPath = this.shortestPath(
         route.stops[route.stops.length - 1],
         route.stops[0],
         legs.flat(),
-        "bus",
+        "bus",routeLane,
       );
       if (
         returnPath.length &&
@@ -184,10 +200,11 @@ export class TrafficModel {
     finish: string,
     history: TrafficEdge[] = [],
     kind: "car" | "bus" = "bus",
+    initialLane=0,
   ): TrafficEdge[] {
-    type State = { node: string; edge?: TrafficEdge; ways: string[] };
+    type State = { node: string; edge?: TrafficEdge; ways: string[]; lane:number };
     const initial: State = {
-      node: start,
+      node: start,lane:initialLane,
       edge: history[history.length - 1],
       ways: history.reduce(
         (ways, e) => this.turnRules.advance(ways, e),
@@ -195,11 +212,11 @@ export class TrafficModel {
       ),
     };
     const key = (s: State) =>
-      JSON.stringify([s.node, s.edge?.wayId, s.edge?.from, s.ways]);
+      JSON.stringify([s.node, s.edge?.wayId, s.edge?.from, s.ways,s.lane]);
     const startKey = key(initial),
       states = new Map<string, State>([[startKey, initial]]),
       distances = new Map<string, number>([[startKey, 0]]),
-      previous = new Map<string, { key: string; edge: TrafficEdge }>(),
+      previous = new Map<string, { key: string; edge: TrafficEdge; lane:number }>(),
       pending = new Set([startKey]);
     let finishKey = "";
     while (pending.size) {
@@ -224,29 +241,39 @@ export class TrafficModel {
           !this.turnRules.allowed(state.edge, edge, state.ways, kind)
         )
           continue;
-        const next: State = {
-            node: edge.to,
-            edge,
-            ways: this.turnRules.advance(state.ways, edge),
-          },
-          id = key(next),
-          cost = best + edge.length;
-        if (cost >= (distances.get(id) ?? Infinity)) continue;
-        distances.set(id, cost);
-        states.set(id, next);
-        previous.set(id, { key: current, edge });
-        pending.add(id);
+        if(kind==="bus"&&(edge.maxHeight<3.2||edge.maxWidth<2.6))continue;
+        const lanes=state.edge?this.targetLanes(state.edge,edge,state.lane):[0];
+        for(const lane of lanes) {
+          const next:State={node:edge.to,edge,ways:this.turnRules.advance(state.ways,edge),lane},id=key(next),cost=best+edge.length;
+          if(cost>=(distances.get(id)??Infinity))continue;
+          distances.set(id,cost);states.set(id,next);previous.set(id,{key:current,edge,lane});pending.add(id);
+        }
       }
     }
     if (!finishKey) return [];
-    const result: TrafficEdge[] = [];
+    const result: TrafficEdge[] = [],lanes:number[]=[];
     for (let id = finishKey; id !== startKey;) {
       const p = previous.get(id);
       if (!p) return [];
-      result.unshift(p.edge);
+      result.unshift(p.edge);lanes.unshift(p.lane);
       id = p.key;
     }
+    this.pathLanes.set(result,lanes);
     return result;
+  }
+  private targetLanes(incoming:TrafficEdge,next:TrafficEdge,lane:number) {
+    const targets=this.laneLinks.targets(incoming,next,incoming.laneNumbers[lane]);
+    return targets===null?[Math.min(lane,next.laneIndices.length-1)]:next.laneNumbers.flatMap((number,index)=>targets.includes(number)?[index]:[]);
+  }
+  connectionPaths(wayId:string,physicalLane:number|null) {
+    return this.laneLinks.entries.filter(c=>c.fromWay===wayId).flatMap(c=>{
+      const from=this.starts.find(e=>e.wayId===c.fromWay&&e.to===c.via&&e.laneNumbers.includes(c.from)),to=this.starts.find(e=>e.wayId===c.toWay&&e.from===c.via&&e.laneNumbers.includes(c.to));
+      if(!from||!to)return [];
+      const a=from.laneNumbers.indexOf(c.from),b=to.laneNumbers.indexOf(c.to);
+      if(physicalLane!==null&&from.laneIndices[a]!==physicalLane)return [];
+      const pose=(edge:TrafficEdge,lane:number,progress:number)=>this.pose({edge,lane,progress,kind:"car"} as TrafficVehicle);
+      return [{start:pose(from,a,Math.max(0,1-12/from.length)),end:pose(to,b,Math.min(1,12/to.length)),via:from.b}];
+    });
   }
   canRoute(stops: string[]): boolean {
     return this.routeWayIds(stops) !== null;
@@ -254,9 +281,10 @@ export class TrafficModel {
   routeWayIds(stops: string[]): string[] | null {
     if (stops.length < 2) return null;
     const ways: string[] = [];
-    const history: TrafficEdge[] = [];
+    const history: TrafficEdge[] = [];let lane=0;
     for (let i = 1; i < stops.length; i++) {
-      const path = this.shortestPath(stops[i - 1], stops[i], history, "bus");
+      const path = this.shortestPath(stops[i - 1], stops[i], history, "bus",lane);
+      lane=this.pathLanes.get(path)?.at(-1)??0;
       history.push(...path);
       if (!path.length) return null;
       for (const edge of path)
@@ -273,7 +301,7 @@ export class TrafficModel {
       edge: first,
       progress: 0.02,
       speed: Math.min(first.speed, 13.9),
-      lane: 0,
+      lane: this.pathLanes.get(this.routes.get(routeId)!.legs[0])?.[0]??0,
       color: 0,
       stopped: false,
       kind: "bus",
@@ -321,14 +349,17 @@ export class TrafficModel {
     lane: number,
     progress: number,
     length = 4.1,
+    ignoreId?:string,
   ): boolean {
     return !Array.from(this.cars.values()).some((car) => {
+      if(car.id===ignoreId)return false;
       const sameLane = car.edge === edge && car.lane === lane;
       const sharedLane =
         car.edge.wayId === edge.wayId &&
         car.edge.from === edge.to &&
         car.edge.to === edge.from &&
         car.edge.laneIndices[car.lane] === edge.laneIndices[lane];
+      if(sharedLane && edge.lanes===1)return true;
       return (
         (sameLane || sharedLane) &&
         Math.abs((sharedLane ? 1 - car.progress : car.progress) - progress) *
@@ -443,7 +474,7 @@ export class TrafficModel {
   private nextEdge(car: TrafficVehicle): TrafficEdge | null {
     const candidates = (this.outgoing.get(car.edge.to) ?? []).filter(
       (edge) =>
-        edge.to !== car.edge.from &&
+        edge.to !== car.edge.from && this.targetLanes(car.edge,edge,car.lane).length>0 &&
         this.turnRules.allowed(
           car.edge,
           edge,
@@ -562,8 +593,11 @@ export class TrafficModel {
         car.stopped = true;
         continue;
       }
-      const nextLane = Math.min(car.lane, next.laneIndices.length - 1);
-      if (!this.hasRoom(next, nextLane, 0, car.kind === "bus" ? 9 : 4.1)) {
+      const choices=this.targetLanes(car.edge,next,car.lane);
+      const planned=car.kind==="bus"?this.pathLanes.get(this.routes.get(car.routeId!)?.legs[car.routeLeg??0]??[])?.[car.routeStep??0]:undefined;
+      const nextLane=planned!==undefined&&choices.includes(planned)?planned:choices[0];
+      if(nextLane===undefined){if(car.kind==="bus")Object.assign(car,routeState);car.progress=1;car.stopped=true;continue;}
+      if (!this.hasRoom(next, nextLane, 0, car.kind === "bus" ? 9 : 4.1,car.id)) {
         car.progress = 1 - 0.001 / car.edge.length;
         car.stopped = true;
         // Roll back bus routing state while waiting for the outgoing lane.

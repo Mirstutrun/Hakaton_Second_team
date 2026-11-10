@@ -1,3 +1,4 @@
+import { buildingShapes } from "./buildingShapes";
 import { createProjection, documentOrigin } from "../geo/projection";
 import {
   coordinateOf,
@@ -23,8 +24,9 @@ type Segment = {
   b: Point;
   tags: Tags;
   bounds: Bounds;
+  passageAtA?:boolean;passageAtB?:boolean;
 };
-type Footprint = { id: string; ring: Point[]; bounds: Bounds };
+type Footprint = { id: string; ring: Point[]; holes:Point[][]; bounds: Bounds };
 
 const CELL = 70;
 const LIMIT = 300;
@@ -93,17 +95,15 @@ function inside(point: Point, ring: Point[]): boolean {
   }
   return result;
 }
-function touchesFootprint(segment: Segment, polygon: Footprint): boolean {
-  if (!overlaps(segment.bounds, polygon.bounds)) return false;
-  if (inside(segment.a, polygon.ring) || inside(segment.b, polygon.ring))
-    return true;
-  for (let i = 0; i < polygon.ring.length; i++) {
-    const a = polygon.ring[i];
-    const b = polygon.ring[(i + 1) % polygon.ring.length];
-    if (intersection(segment.a, segment.b, a, b)) return true;
-  }
+function touchesFootprint(segment:Segment,polygon:Footprint):boolean {
+  if(!overlaps(segment.bounds,polygon.bounds))return false;
+  const occupied=(p:Point)=>inside(p,polygon.ring)&&!polygon.holes.some(h=>inside(p,h));
+  const nearPassage=(p:Point)=>!!(segment.passageAtA&&Math.sqrt(squared(p,segment.a))<.15||segment.passageAtB&&Math.sqrt(squared(p,segment.b))<.15);
+  if(occupied(segment.a)&&!nearPassage(segment.a)||occupied(segment.b)&&!nearPassage(segment.b)||occupied({x:(segment.a.x+segment.b.x)/2,z:(segment.a.z+segment.b.z)/2}))return true;
+  for(const ring of [polygon.ring,...polygon.holes])for(let i=0;i<ring.length;i++){const p=intersection(segment.a,segment.b,ring[i],ring[(i+1)%ring.length]);if(p&&!nearPassage(p))return true;}
   return false;
 }
+
 function atGrade(tags: Tags): boolean {
   return !(
     (tags.bridge && tags.bridge !== "no") ||
@@ -175,6 +175,7 @@ export function auditGeometry(document: OsmDocument): ValidationIssue[] {
       coordinates.set(id, projection.project(point));
   }
 
+  const passageNodes=new Set<string>();for(const w of document.ways.values())if(tagsOf(w).tunnel==="building_passage"){const refs=refsOf(w);passageNodes.add(refs[0]);passageNodes.add(refs.at(-1)!);}
   const buildingGrid = new SpatialGrid<Footprint>();
   const segments: Segment[] = [];
   const segmentGrid = new SpatialGrid<Segment>();
@@ -183,20 +184,6 @@ export function auditGeometry(document: OsmDocument): ValidationIssue[] {
   for (const [id, way] of document.ways) {
     const tags = tagsOf(way);
     const refs = refsOf(way);
-    if (tags.building && tags.building !== "no" && refs.length >= 4 &&
-        refs[0] === refs[refs.length - 1]) {
-      const ring = refs.slice(0, -1).map((ref) => coordinates.get(ref));
-      if (ring.every((point): point is Point => Boolean(point)) && ring.length >= 3) {
-        const xs = ring.map((point) => point!.x);
-        const zs = ring.map((point) => point!.z);
-        const footprint = {
-          id, ring: ring as Point[],
-          bounds: { minX: Math.min(...xs), minZ: Math.min(...zs),
-            maxX: Math.max(...xs), maxZ: Math.max(...zs) },
-        };
-        buildingGrid.add(footprint.bounds, footprint);
-      }
-    }
     if (!isRoad(tags)) continue;
     roadWays.set(id, refs);
     for (const ref of new Set(refs))
@@ -213,13 +200,19 @@ export function auditGeometry(document: OsmDocument): ValidationIssue[] {
       }
       const segment: Segment = {
         wayId: id, index, aId: refs[index - 1], bId: refs[index],
-        a, b, tags, bounds: box(a, b),
+        a, b, tags, bounds: box(a, b),passageAtA:passageNodes.has(refs[index-1]),passageAtB:passageNodes.has(refs[index]),
       };
       segments.push(segment);
       segmentGrid.add(segment.bounds, segment);
     }
   }
 
+  for(const shape of buildingShapes(document,projection)) {
+    if(shape.outer.length<3)continue;
+    const xs=shape.outer.map(p=>p.x),zs=shape.outer.map(p=>p.z);
+    const footprint={id:shape.id,ring:shape.outer,holes:shape.holes,bounds:{minX:Math.min(...xs),maxX:Math.max(...xs),minZ:Math.min(...zs),maxZ:Math.max(...zs)}};
+    buildingGrid.add(footprint.bounds,footprint);
+  }
   // Exact geometric crossings of two motor roads on the same surface level.
   const seen = new Set<string>();
   for (const segment of segments) {
@@ -264,7 +257,7 @@ export function auditGeometry(document: OsmDocument): ValidationIssue[] {
       reported.add(key);
       push({
         severity: "warning", code: "road-building-overlap",
-        id: segment.wayId, elementType: "way",
+        id: segment.wayId, elementType: "way",buildingId:building.id,
         coordinate: projection.unproject({
           x: (segment.a.x + segment.b.x) / 2,
           z: (segment.a.z + segment.b.z) / 2,

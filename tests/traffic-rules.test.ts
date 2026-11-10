@@ -3,8 +3,6 @@ import { parseOsm } from "../src/core/osm/parser";
 import { serializeOsm } from "../src/core/osm/serializer";
 import { drivingLanes, oneWayDirection, laneTagInfo } from "../src/engine/trafficRules";
 import { TrafficModel, speedMetersPerSecond } from "../src/engine/TrafficModel";
-import { reviewBaseline, reviewReport } from "../src/core/osm/reviewReport";
-import { applyEdit, applyPatch } from "../src/core/osm/commands";
 const xml = (tags = '') => `<osm version="0.6"><node id="1" lat="52" lon="104"/><node id="2" lat="52" lon="104.002"/><way id="10"><nd ref="1"/><nd ref="2"/><tag k="highway" v="residential"/><tag k="lanes" v="4"/>${tags}</way></osm>`;
 
 describe("traffic direction regressions", () => {
@@ -74,11 +72,5 @@ describe("traffic direction regressions", () => {
     expect(speedMetersPerSecond({maxspeed:"30 mph"})).toBeCloseTo(13.4112);
     expect(speedMetersPerSecond({maxspeed:"0"})).toBe(0);
   });
-  it("reports actual XML changes and removes undone edits from comparison", () => {
-    const doc=parseOsm(xml()); const baseline=reviewBaseline(doc);
-    const patch=applyEdit(doc,{type:"set-tags",target:{type:"way",id:"10"},tags:{lanes:"2"}});
-    expect(reviewReport(baseline,doc).changes.ways.modified).toEqual(["10"]);
-    applyPatch(doc,patch,"before");
-    expect(reviewReport(baseline,doc).changes.ways.modified).toEqual([]);
-  });
+
 });

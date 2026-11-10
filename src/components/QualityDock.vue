@@ -1,10 +1,17 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
 import { coordinateOf, refsOf } from "../core/osm/model";
+import { buildingShapes } from "../core/osm/buildingShapes";
+import type { ValidationIssue } from "../core/osm/validation";
 import { documentOrigin } from "../core/geo/projection";
 import { useEditorStore } from "../stores/editor";
 
 const store = useEditorStore();
+const passageWidth=ref(3.5),passageHeight=ref(2.7);
+function proposePassage(issue:ValidationIssue){if(!issue.id||!issue.buildingId)return;store.passageProposal={wayId:issue.id,buildingId:issue.buildingId};passageWidth.value=3.5;passageHeight.value=2.7;}
+function makePassage(){const p=store.passageProposal;if(!p)return;const result=store.execute({type:"mark-building-passage",...p,width:passageWidth.value,height:passageHeight.value});if(result){store.passageProposal=null;store.message="Проезд через арку выделен отдельным участком. Проверьте ширину и высоту по реальному месту";}}
+function fixBuilding(issue:ValidationIssue,courtyard=false){if(!store.document||!issue.buildingId)return;const shape=buildingShapes(store.document).find(s=>s.id===issue.buildingId);if(!shape)return;store.selectOsmElement({type:"way",id:shape.outerWay});store.workspaceMode="edit";store.focusRequest++;if(courtyard){store.view="2d";store.courtyardOwner=shape.outerWay;store.draft=[];store.tool="courtyard";store.inspectorOpen=false;}else{store.tool="move";store.view="2d";}}
+
 const open = ref(true);
 const filter = ref("all");
 const mapOpen = ref(false);
@@ -189,6 +196,16 @@ function repair(index: number) {
           class="qa-issue"
         >
           <p>{{ issue.message }}</p>
+          <div v-if="issue.code === 'road-building-overlap' && issue.buildingId" class="conflict-solutions">
+            <strong>Что находится здесь в реальности?</strong>
+            <button @click="proposePassage(issue)">Проезд через арку</button><button @click="fixBuilding(issue,true)">Открытый двор внутри здания</button><button @click="fixBuilding(issue)">Контур здания нарисован неверно</button>
+            <p>Выберите решение только после сверки с картой или местностью. Для арки сохраняются габариты, для двора вырезается внутренний контур.</p>
+            <form v-if="store.passageProposal?.wayId===issue.id && store.passageProposal?.buildingId===issue.buildingId" @submit.prevent="makePassage">
+              <label>Ширина проезда, м<input v-model.number="passageWidth" type="number" min="2" max="30" step="0.1" required /></label>
+              <label>Высота арки, м<input v-model.number="passageHeight" type="number" min="2.2" max="15" step="0.1" required /></label>
+              <button class="primary">Выделить участок арки</button><button type="button" @click="store.passageProposal=null">Отмена</button>
+            </form>
+          </div>
           <div class="qa-issue-actions">
             <button v-if="issue.id" @click="locate(index)">Показать</button>
             <button v-if="issue.fix" class="qa-repair" @click="repair(index)">
@@ -208,13 +225,7 @@ function repair(index: number) {
       >
         Скачать отчёт JSON
       </button>
-      <button
-        class="qa-more"
-        :disabled="!store.document"
-        @click="store.exportReviewReport"
-      >
-        Отчёт до / после для защиты
-      </button>
+
       <button
         v-if="issueList.length > 35"
         class="qa-more"

@@ -1999,3 +1999,32 @@ button.primary,
     padding: 10px 5px;
   }
 }
+
+.geometry-details label,
+.conflict-solutions label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 11px;
+  color: #597553;
+}
+.geometry-details input,
+.geometry-details select,
+.conflict-solutions input {
+  min-width: 0;
+  padding: 8px;
+  font-size: 12px;
+}
+.conflict-solutions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  margin: 10px 0;
+  border: 1px solid #e6d7c7;
+  border-radius: 8px;
+  background: #fffaf3;
+}
+.conflict-solutions p { font-size: 11px; line-height: 1.5; }
+.conflict-solutions form { display: grid; gap: 8px; }
+.properties-form input[type="color"] { width: 100%; min-height: 36px; padding: 3px; }

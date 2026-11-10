@@ -186,6 +186,7 @@ function keyboard(event: KeyboardEvent) {
     store.tool = "select";
   }
   if (event.key === "Enter" && store.tool === "draw") store.finishRoad();
+  if(event.key === "Enter" && ["building","courtyard"].includes(store.tool))store.finishArea();
   if (key === "f") store.focusRequest++;
   const tool = editorTools.find((tool) => tool.key.toLowerCase() === key);
   if (tool) {
@@ -446,7 +447,7 @@ onBeforeUnmount(() => {
             <b>Проверьте результат</b>
             <p>
               В «Транспорте» добавьте машины. В «Проверке» найдите разрывы и
-              сохраните отчёт до/после.
+              проверьте выделенные проблемы перед сохранением.
             </p>
           </li>
           <li>

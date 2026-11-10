@@ -16,6 +16,7 @@ export interface ValidationIssue {
   elementType?: "node" | "way" | "relation";
   code?: string;
   coordinate?: Coordinate;
+  buildingId?: string;
   fix?:
     | {
         kind: "connect-crossing";

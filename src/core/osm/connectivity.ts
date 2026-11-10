@@ -1,6 +1,9 @@
+import { obstacleFilter } from "./obstacles";
+import {createProjection,documentOrigin} from "../geo/projection";
 import { coordinateOf, refsOf, tagsOf, type OsmDocument } from "./model";
 import { oneWayDirection } from "../../engine/trafficRules";
 export function networkConnectivity(document: OsmDocument) {
+  const projection=createProjection(documentOrigin(document)),blocked=obstacleFilter(document,projection);
   const graph = new Map<string, Set<string>>(),
     reverse = new Map<string, Set<string>>(),
     weak = new Map<string, Set<string>>();
@@ -34,6 +37,8 @@ export function networkConnectivity(document: OsmDocument) {
     const refs = refsOf(way).filter((id) => document.nodes.has(id));
     ways.set(id, refs);
     for (let i = 1; i < refs.length; i++) {
+      if(tagsOf(document.nodes.get(refs[i-1])!).barrier === "block"||tagsOf(document.nodes.get(refs[i])!).barrier === "block")continue;
+      if(blocked(projection.project(coordinateOf(document.nodes.get(refs[i-1])!)),projection.project(coordinateOf(document.nodes.get(refs[i])!))))continue;
       const a = refs[i - 1],
         b = refs[i],
         dir = oneWayDirection(t);
