@@ -1,14 +1,11 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
-import { coordinateOf, refsOf } from "../core/osm/model";
-import { documentOrigin } from "../core/geo/projection";
 import { useEditorStore } from "../stores/editor";
 import { applyFix, fixLabel } from "../editor/issueFixes";
 
 const store = useEditorStore();
 const open = ref(true);
 const filter = ref("all");
-const mapOpen = ref(false);
 const showAll = ref(false);
 const issueList = computed(() => store.problems);
 const visibleIssues = computed(() =>
@@ -33,33 +30,6 @@ const counts = computed(() => ({
       issue.code === "isolated-component",
   ).length,
 }));
-const center = computed(() => {
-  store.revision;
-  const document = store.document;
-  if (!document) return { lat: 52.264, lon: 104.267 };
-  const selected = store.selection;
-  if (selected?.type === "node") {
-    const node = document.nodes.get(selected.id);
-    if (node) return coordinateOf(node);
-  }
-  if (selected?.type === "way") {
-    const way = document.ways.get(selected.id);
-    if (way) {
-      const ref = refsOf(way)[0];
-      const node = document.nodes.get(ref);
-      if (node) return coordinateOf(node);
-    }
-  }
-  return documentOrigin(document);
-});
-const yandexUrl = computed(() => {
-  const { lat, lon } = center.value;
-  return `https://yandex.ru/map-widget/v1/?ll=${encodeURIComponent(lon.toFixed(6) + "," + lat.toFixed(6))}&z=17`;
-});
-const externalMap = computed(() => {
-  const { lat, lon } = center.value;
-  return `https://yandex.ru/maps/?ll=${encodeURIComponent(lon.toFixed(6) + "," + lat.toFixed(6))}&z=17`;
-});
 function locate(index: number) {
   const issue = issueList.value[index];
   if (!issue?.id || !issue.elementType) return;
@@ -106,13 +76,6 @@ function locate(index: number) {
         Ошибки сети
         <strong>{{ issueList.length }}</strong>
       </button>
-      <button
-        class="qa-trigger"
-        :aria-expanded="mapOpen"
-        @click="mapOpen = !mapOpen"
-      >
-        Сверить с картой
-      </button>
     </div>
     <div v-if="open" class="qa-panel">
       <div class="qa-header">
@@ -130,7 +93,7 @@ function locate(index: number) {
           ><strong>{{ counts.crossings }}</strong> Пересечения</span
         >
         <span
-          ><strong>{{ counts.buildings }}</strong> Здания</span
+          ><strong>{{ counts.buildings }}</strong> Проезды</span
         >
         <span
           ><strong>{{ counts.gaps }}</strong> Разрывы</span
@@ -182,34 +145,6 @@ function locate(index: number) {
       >
         {{ showAll ? "Свернуть" : "Показать все предупреждения" }}
       </button>
-    </div>
-    <div v-if="mapOpen" class="reference-panel">
-      <div class="qa-header">
-        <div>
-          <small>ВИЗУАЛЬНАЯ СВЕРКА</small>
-          <h3>Яндекс Карты</h3>
-        </div>
-        <button aria-label="Закрыть карту" @click="mapOpen = false">×</button>
-      </div>
-      <p class="qa-subtitle">
-        Расположение по выбранному объекту. Это карта для сравнения, а не
-        геодезически совмещённая подложка.
-      </p>
-      <iframe
-        :key="yandexUrl"
-        :src="yandexUrl"
-        title="Яндекс Карты — справочная карта"
-        referrerpolicy="strict-origin-when-cross-origin"
-        loading="lazy"
-        allowfullscreen
-      ></iframe>
-      <a :href="externalMap" target="_blank" rel="noopener noreferrer"
-        >Открыть выбранную точку в Яндекс Картах ↗</a
-      >
-      <small class="qa-provider-note"
-        >Отображение встроенной карты зависит от доступности сервиса и условий
-        Яндекса.</small
-      >
     </div>
   </div>
 </template>

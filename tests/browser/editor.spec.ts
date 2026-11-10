@@ -410,13 +410,24 @@ test("workspace modes, review button, help and narrow-screen inspector", async (
   // Проверка открывается кнопкой в любом разделе, без отдельного режима.
   await page.getByRole("button", { name: /Проверка ·/ }).click();
   await expect(page.getByRole("combobox", { name: "Тип проблемы" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Сверить с картой" })).toHaveCount(0);
+  await expect(page.locator(".qa-dock iframe")).toHaveCount(0);
+  await expect(page.locator(".qa-dock").getByRole("button", { name: /JSON/ })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "+ 10 машин" })).toBeVisible();
   await page.screenshot({ path: testInfo.outputPath("review-traffic.png") });
   await page.getByRole("button", { name: "Скрыть панель проверки" }).click();
   await page.getByRole("button", { name: "Редактирование", exact: true }).click();
+  await page.evaluate(async () => {
+    const store = (await import("/src/stores/editor.ts")).useEditorStore();
+    const road = Array.from(store.document!.ways.values()).find(way => way.querySelector('tag[k="highway"]'))!;
+    store.selectOsmElement({ type: "way", id: road.getAttribute("id")! });
+  });
   await page.getByRole("button", { name: /Проверка ·/ }).click();
   await expect(page.getByRole("combobox", { name: "Тип проблемы" })).toBeVisible();
   await page.getByRole("button", { name: /Проверка ·/ }).click();
+  await expect(page.locator(".workspace")).toHaveClass(/inspector-open/);
+  await expect(page.locator(".properties-panel h2")).toBeVisible();
+  await page.getByRole("button", { name: "Снять выделение", exact: true }).click();
   await page.screenshot({ path: testInfo.outputPath("editor-desktop.png") });
   await page.getByRole("button", { name: "3D", exact: true }).click();
   await page.getByRole("button", { name: "Вся карта", exact: true }).click();
@@ -427,6 +438,7 @@ test("workspace modes, review button, help and narrow-screen inspector", async (
       () => document.documentElement.scrollWidth <= window.innerWidth,
     ),
   ).toBe(true);
+  await page.getByRole("button", { name: "Закрыть свойства", exact: true }).click();
   await page.getByRole("button", { name: "Свойства объекта", exact: true }).click();
   await expect(
     page.getByText("Выберите дорогу", { exact: true }),

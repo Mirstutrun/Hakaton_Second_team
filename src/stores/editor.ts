@@ -310,7 +310,7 @@ export const useEditorStore = defineStore("editor", () => {
   /** Кнопка «Проверка»: показать или скрыть панель ошибок сети в текущем разделе. */
   function toggleReview() {
     reviewOpen.value = !reviewOpen.value;
-    inspectorOpen.value = reviewOpen.value;
+    inspectorOpen.value = reviewOpen.value || !!selection.value;
     if (reviewOpen.value) showGraphIssues.value = true;
   }
 
