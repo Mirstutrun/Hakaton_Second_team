@@ -323,6 +323,9 @@ test("transport: no select tool, stops beside the road, bus route and vehicles",
   await ready(page);
   const node = await loadJunction(page, -60, 0);
   await page.getByRole("button", { name: "Транспорт", exact: true }).click();
+  await page.getByRole("button", { name: "⏸ Пауза", exact: true }).click();
+  page.once("dialog", dialog => dialog.accept());
+  await page.getByRole("button", { name: "Очистить", exact: true }).click();
   await expect(
     page.locator(".tools-panel").getByRole("button", { name: /Выбрать объект/ }),
   ).toHaveCount(0);
@@ -366,9 +369,18 @@ test("transport: no select tool, stops beside the road, bus route and vehicles",
   const store = () =>
     page.evaluate(async () => {
       const s = (await import("/src/stores/editor.ts")).useEditorStore();
-      return { buses: s.busCount, vehicles: s.vehicleCount, running: s.trafficRunning };
+      return { buses: s.busCount, vehicles: s.vehicleCount, running: s.trafficRunning, error: s.error };
     });
   expect((await store()).buses).toBe(1);
+  await page.getByRole("button", { name: "+ Автобус" }).click();
+  expect((await store()).buses).toBe(1);
+  await expect(page.getByRole("alert")).toContainText("Начало маршрута занято");
+  page.once("dialog", dialog => dialog.accept());
+  await page.getByRole("button", { name: "Очистить", exact: true }).click();
+  await page.getByRole("button", { name: "+ Автобус" }).click();
+  expect((await store()).buses).toBe(1);
+  expect((await store()).error).toBe("");
+  await page.getByRole("button", { name: "▶ Продолжить", exact: true }).click();
   page.once("dialog", (dialog) => dialog.accept());
   await page.getByRole("button", { name: "Очистить" }).click();
   await page.keyboard.press("Space");

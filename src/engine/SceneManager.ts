@@ -489,12 +489,15 @@ export class SceneManager {
     if (!this.traffic || !this.store.selectedBusRoute) return;
     const id = this.traffic.addBus(this.store.selectedBusRoute);
     if (!id) {
-      this.store.error = "Для маршрута нет доступного пути";
+      this.store.error = this.traffic.routeEdges(this.store.selectedBusRoute).length
+        ? "Начало маршрута занято. Дождитесь освобождения полосы или уберите машины."
+        : "Для маршрута нет доступного пути";
       return;
     }
     this.spawnCarMesh(id);
     this.store.vehicleCount = this.traffic.size;
     this.store.busCount = this.traffic.busCount;
+    this.store.error = "";
   }
 
   private spawnCarMesh(id: string) {
