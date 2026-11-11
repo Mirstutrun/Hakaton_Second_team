@@ -1,12 +1,35 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed, nextTick, ref, watch } from "vue";
 import { useEditorStore } from "../stores/editor";
 import { applyFix, fixLabel } from "../editor/issueFixes";
+import { coordinateOf, refsOf, type Coordinate } from "../core/osm/model";
+import { documentOrigin } from "../core/geo/projection";
 
 const store = useEditorStore();
 const open = ref(true);
 const filter = ref("all");
 const showAll = ref(false);
+const mapOpen = ref(false);
+const referencePanel = ref<HTMLDivElement>();
+const issueCoordinate = ref<Coordinate | null>(null);
+watch(() => store.selection, () => {
+  issueCoordinate.value = null;
+}, { flush: "sync" });
+
+const mapLocation = computed(() => {
+  store.revision;
+  const document = store.document;
+  if (!document) return "";
+  const selected = store.selection;
+  const way = selected?.type === "way" ? document.ways.get(selected.id) : undefined;
+  const nodeId = selected?.type === "node" ? selected.id : way ? refsOf(way)[0] : undefined;
+  const node = nodeId ? document.nodes.get(nodeId) : undefined;
+  const { lat, lon } = issueCoordinate.value ??
+    (node ? coordinateOf(node) : documentOrigin(document));
+  return new URLSearchParams({ ll: `${lon.toFixed(6)},${lat.toFixed(6)}`, z: "17" }).toString();
+});
+const yandexUrl = computed(() => `https://yandex.ru/map-widget/v1/?${mapLocation.value}`);
+const externalMap = computed(() => `https://yandex.ru/maps/?${mapLocation.value}`);
 const issueList = computed(() => store.problems);
 const visibleIssues = computed(() =>
   issueList.value
@@ -39,6 +62,9 @@ function locate(index: number) {
   store.selectOsmElement({ type, id: issue.id });
   store.focusCoordinate = issue.coordinate ?? null;
   store.focusRequest++;
+  issueCoordinate.value = issue.coordinate ?? null;
+  mapOpen.value = true;
+  void nextTick(() => referencePanel.value?.scrollIntoView({ block: "nearest" }));
 }
 </script>
 
@@ -75,6 +101,13 @@ function locate(index: number) {
         <span class="qa-symbol">◇</span>
         Ошибки сети
         <strong>{{ issueList.length }}</strong>
+      </button>
+      <button
+        class="qa-trigger"
+        :aria-expanded="mapOpen"
+        @click="mapOpen = !mapOpen"
+      >
+        Сверить с картой
       </button>
     </div>
     <div v-if="open" class="qa-panel">
@@ -146,5 +179,40 @@ function locate(index: number) {
         {{ showAll ? "Свернуть" : "Показать все предупреждения" }}
       </button>
     </div>
+    <div v-if="mapOpen" ref="referencePanel" class="qa-panel reference-panel">
+      <div class="qa-header">
+        <div>
+          <small>ВИЗУАЛЬНАЯ СВЕРКА</small>
+          <h3>Яндекс Карты</h3>
+        </div>
+        <button aria-label="Закрыть карту" @click="mapOpen = false">×</button>
+      </div>
+      <iframe
+        :key="yandexUrl"
+        :src="yandexUrl"
+        title="Яндекс Карты — справочная карта"
+        referrerpolicy="strict-origin-when-cross-origin"
+        loading="lazy"
+        allowfullscreen
+      ></iframe>
+      <a :href="externalMap" target="_blank" rel="noopener noreferrer">
+        Открыть выбранную точку в Яндекс Картах ↗
+      </a>
+    </div>
   </div>
 </template>
+
+<style scoped>
+.reference-panel iframe {
+  width: 100%;
+  height: 300px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+}
+.reference-panel a {
+  display: block;
+  font-size: 10px;
+  color: #6b8c58;
+  margin: 12px 0;
+}
+</style>
