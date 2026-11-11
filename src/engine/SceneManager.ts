@@ -34,6 +34,7 @@ import {
 import { TrafficModel } from "./TrafficModel";
 import { buildBuilding, type PassageCut } from "./geometry/buildings";
 import { planRoadLink } from "../core/osm/laneConnectivity";
+import { isTrafficSignal } from "../core/osm/trafficSignals";
 import type { useEditorStore } from "../stores/editor";
 
 export class SceneManager {
@@ -45,6 +46,7 @@ export class SceneManager {
   private wayMeshes = new Map<string, Mesh[]>();
   private buildingMeshes:Mesh[]=[];
   private signalMeshes = new Map<string, Mesh[]>();
+  private signalLamps = new Map<string, Mesh>();
   private junctionCounts = new Map<string, number>();
   private handles: Mesh[] = [];
   private issueMeshes: Mesh[] = [];
@@ -138,6 +140,8 @@ export class SceneManager {
       signWhite: "#fffdf3",
       signInk: "#28333b",
       busStop: "#ffbf48",
+      trafficRed: "#f53d3d",
+      trafficGreen: "#16c95e",
     })) {
       const material = new StandardMaterial(name, this.scene);
       material.diffuseColor = Color3.FromHexString(color);
@@ -150,6 +154,8 @@ export class SceneManager {
           "selectedVehicle",
           "handle",
           "lamp",
+          "trafficRed",
+          "trafficGreen",
           "issueCrossing",
           "issueBuilding",
           "issueGap",
@@ -224,6 +230,7 @@ export class SceneManager {
       meshes.forEach((mesh) => mesh.dispose());
     this.wayMeshes.clear();
     this.signalMeshes.clear();
+    this.signalLamps.clear();
     this.clearVehicles();
     this.traffic = new TrafficModel(document, this.store.drivingSide);
     this.refreshRoute();
@@ -260,7 +267,7 @@ export class SceneManager {
       const tags = node ? tagsOf(node) : {};
       if (
         (this.junctionCounts.get(id) ?? 0) > 1 ||
-        tags.highway === "traffic_signals" ||
+        isTrafficSignal(tags) ||
         tags.public_transport === "stop_position" ||
         tags.barrier ||
         tags.railway
@@ -314,10 +321,11 @@ export class SceneManager {
       if(mesh){mesh.metadata={role:"building",type:"way",id:shape.outerWay,wayIds:shape.wayIds};this.buildingMeshes.push(mesh);}
     }
   }
-  /** Маркеры узлов: автобусная остановка сбоку от дороги и блоки-препятствия из данных. */
+  /** Маркеры узлов: светофоры, остановки и блоки. */
   private refreshSignal(id: string) {
     this.signalMeshes.get(id)?.forEach((mesh) => mesh.dispose());
     this.signalMeshes.delete(id);
+    this.signalLamps.delete(id);
     const node = this.document?.nodes.get(id);
     const point = this.point(id);
     if (!node || !point) return;
@@ -333,6 +341,36 @@ export class SceneManager {
       mesh.metadata = { role: "block", type: "node", id };
       this.signalMeshes.set(id, [mesh]);
       return;
+    }
+    if (isTrafficSignal(nodeTags)) {
+      const way = [...this.document!.ways.values()].find(candidate => {
+        const tags = tagsOf(candidate);
+        return tags.highway && !roadStyle(tags).pedestrian && refsOf(candidate).includes(id);
+      });
+      if (way) {
+        const style = roadStyle(tagsOf(way));
+        const refs = refsOf(way);
+        const index = refs.indexOf(id);
+        const neighbour = this.point(refs[index + 1] ?? refs[index - 1]);
+        const along = neighbour?.subtract(point).normalize() ?? new Vector3(0, 0, 1);
+        const position = point.add(
+          new Vector3(along.z, 0, -along.x).scale(style.width / 2 + 1.2),
+        );
+        position.y = style.elevation;
+        const pole = MeshBuilder.CreateCylinder(`signal-pole:${id}`, {
+          height: 4, diameter: 0.45, tessellation: 8,
+        }, this.scene);
+        pole.position = position.add(new Vector3(0, 2, 0));
+        pole.material = this.materials.pole;
+        const lamp = MeshBuilder.CreateSphere(`signal-lamp:${id}`, {
+          diameter: 3, segments: 8,
+        }, this.scene);
+        lamp.position = position.add(new Vector3(0, 4.6, 0));
+        lamp.material = this.materials.trafficRed;
+        pole.metadata = lamp.metadata = { type: "node", id, role: "signal" };
+        this.signalMeshes.set(id, [pole, lamp]);
+        this.signalLamps.set(id, lamp);
+      }
     }
     if (nodeTags.public_transport !== "stop_position" || nodeTags.bus !== "yes") return;
     const way = Array.from(this.document!.ways.values()).find(
@@ -364,7 +402,7 @@ export class SceneManager {
     sign.position = place.add(along.scale(3.4)).add(new Vector3(0, 1.8, 0));
     sign.material = this.materials.busStop;
     sign.metadata = { type: "node", id, role: "stop" };
-    this.signalMeshes.set(id, [shelter, sign]);
+    this.signalMeshes.set(id, [...(this.signalMeshes.get(id) ?? []), shelter, sign]);
   }
 
   private platformOf(stopId: string): string | undefined {
@@ -585,6 +623,12 @@ export class SceneManager {
         this.engine.getDeltaTime() / 1000,
         this.store.trafficSpeed,
       );
+    const lampScale = Math.max(1, Math.min(3, this.camera.radius / 500));
+    for (const [id, lamp] of this.signalLamps) {
+      const material = this.materials[this.traffic.signalIsRed(id) ? "trafficRed" : "trafficGreen"];
+      if (lamp.material !== material) lamp.material = material;
+      lamp.scaling.setAll(lampScale);
+    }
     // Машины, доехавшие до конца дороги, исчезают с карты.
     if (this.traffic.finished.length) {
       for (const id of this.traffic.finished.splice(0)) {
@@ -1230,7 +1274,7 @@ export class SceneManager {
           this.drag.point = ray.origin.add(ray.direction.scale(distance));
           this.drag.mesh.position.copyFrom(this.drag.point);
         }
-      } else if (["draw", "bus-stop"].includes(this.store.tool)) {
+      } else if (["draw", "bridge", "bus-stop"].includes(this.store.tool)) {
         const point = this.groundPoint();
         if (point) this.refreshPreview(point);
       }
@@ -1262,15 +1306,15 @@ export class SceneManager {
     const pick = this.scene.pick(
       this.scene.pointerX,
       this.scene.pointerY,
-      (mesh) =>
-        tool === "bus-route"
-          ? mesh.metadata?.role === "stop"
-          : roadOnly
-            ? mesh.metadata?.role === "road"
-            : traffic
-              // В «Транспорте» объекты карты не выбираются: только машины и остановки.
-              ? ["vehicle", "stop"].includes(mesh.metadata?.role)
-              : ["road", "handle", "issue"].includes(mesh.metadata?.role),
+      (mesh) => {
+        const role = mesh.metadata?.role;
+        if (tool === "bus-route") return role === "stop";
+        if (tool === "signal") return role === "road" || role === "signal";
+        if (roadOnly) return role === "road";
+        return traffic
+          ? ["vehicle", "stop"].includes(role)
+          : ["road", "handle", "issue", "signal"].includes(role);
+      },
     );
     const metadata = pick?.pickedMesh?.metadata;
     if (tool === "car") {
@@ -1330,7 +1374,34 @@ export class SceneManager {
       else this.store.error = "Нажмите на маркер остановки";
       return;
     }
-    if (tool === "draw") {
+    if (tool === "signal") {
+      if (metadata?.role === "signal") {
+        this.store.reviewOpen = false;
+        this.store.selectOsmElement({ type: "node", id: metadata.id });
+        this.store.tool = "select";
+      } else if (metadata?.role === "road" && pick?.pickedPoint) {
+        const position = pick.pickedPoint.clone();
+        position.y = 0;
+        const nearest = this.nearestSegment(metadata.id, position);
+        const patch = this.store.execute({
+          type: "add-signal",
+          wayId: metadata.id,
+          index: nearest.index,
+          point: nearest.nodeId
+            ? { nodeId: nearest.nodeId }
+            : this.projection.unproject(nearest.point),
+        });
+        if (patch?.selection) {
+          this.store.reviewOpen = false;
+          this.store.selectOsmElement(patch.selection);
+          this.store.tool = "select";
+        }
+      } else {
+        this.store.error = "Нажмите на автомобильную дорогу в месте установки светофора";
+      }
+      return;
+    }
+    if (tool === "draw" || tool === "bridge") {
       const point = this.groundPoint();
       if (point) {
         this.store.draft.push(this.snap(point));
@@ -1399,6 +1470,7 @@ export class SceneManager {
       return;
     }
     this.store.selectedVehicle = null;
+    if (metadata.role === "signal") this.store.reviewOpen = false;
     if (metadata.role === "road" && metadata.type === "way") {
       this.store.selectOsmElement({ type: "way", id: metadata.id });
       this.store.selectedLane = pick?.pickedPoint

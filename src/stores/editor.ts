@@ -331,11 +331,25 @@ export const useEditorStore = defineStore("editor", () => {
     error.value = "";
   }
   function finishRoad() {
+    const bridge = tool.value === "bridge";
+    // Общие узлы нужны на подходах. Промежуточные точки пролёта лежат выше других дорог.
+    const points = bridge
+      ? draft.value.map((point, index) => {
+          if (index === 0 || index === draft.value.length - 1) return point;
+          if ("wayId" in point) return point.coordinate;
+          if ("nodeId" in point) return coordinateOf(document.value!.nodes.get(point.nodeId)!);
+          return point;
+        })
+      : draft.value;
     if (
       execute({
         type: "create-road",
-        points: draft.value,
-        tags: { highway: "residential", lanes: "2" },
+        points,
+        tags: {
+          highway: "residential",
+          lanes: "2",
+          ...(bridge ? { bridge: "yes", layer: "1" } : {}),
+        },
       })
     ) {
       draft.value = [];

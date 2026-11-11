@@ -38,7 +38,7 @@ const groups = computed<{ title: string; tools: EditorTool[] }[]>(() =>
     ? [{ title: "Транспорт на карте", tools: ["car", "bus-stop", "bus-route"] }]
     : [
         { title: "Выбрать", tools: ["select", "lane"] },
-        { title: "Изменить сеть", tools: ["draw", "move", "insert"] },
+        { title: "Изменить сеть", tools: ["draw", "move", "insert", "bridge", "signal"] },
       ],
 );
 function choose(id: EditorTool) {

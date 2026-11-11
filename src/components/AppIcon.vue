@@ -5,6 +5,8 @@ const paths: Record<string, string> = {
   lane: "M3 19L8 4M21 19L16 4M12 6v3m0 4v3m0 3v1",
   car: "M5 16H3v-5l2-2 2-5h10l2 5 2 2v5h-2M5 16h14M5 16v3m14-3v3M5 9h14M7 13h2m6 0h2",
   draw: "M4 18l5-12 6 12 5-12M4 18h.01M9 6h.01M15 18h.01M20 6h.01",
+  bridge: "M3 12h18M5 12v7m14-7v7M5 12a7 7 0 0 1 14 0",
+  signal: "M8 3h8v13H8zM12 16v5m0-14h.01m0 5h.01",
   "lane-link": "M4 4v7h8M20 20v-7h-8M12 11l4-4M12 13l-4 4",
   review: "M9 12l2 2 4-4M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0",
   move: "M12 3v18M3 12h18M9 6l3-3 3 3M9 18l3 3 3-3M6 9l-3 3 3 3M18 9l3 3-3 3",

@@ -187,7 +187,7 @@ function keyboard(event: KeyboardEvent) {
     store.laneLinkSource = null;
     store.tool = "select";
   }
-  if (event.key === "Enter" && store.tool === "draw") store.finishRoad();
+  if (event.key === "Enter" && ["draw", "bridge"].includes(store.tool)) store.finishRoad();
   if (key === "f") store.focusRequest++;
   // J — ручное соединение выбранной дороги/полосы с другой дорогой.
   if (key === "j") {

@@ -333,8 +333,18 @@ export function assertRoadEditSafe(document: OsmDocument, patch: EditPatch) {
             continue;
           const t = tagsOf(other),
             otherRefs = refsOf(other);
+          const bridgeApproach =
+            patch.label === "create-road" &&
+            !oldWay &&
+            tags.bridge === "yes" &&
+            (ref === refs[0] || ref === refs.at(-1)) &&
+            Number(t.layer || 0) === 0 &&
+            (!t.bridge || t.bridge === "no") &&
+            (!t.tunnel || t.tunnel === "no") &&
+            t.covered !== "yes";
           if (
             Number(t.layer || 0) !== Number(tags.layer || 0) &&
+            !bridgeApproach &&
             ref !== otherRefs[0] &&
             ref !== otherRefs[otherRefs.length - 1] &&
             !junctionExisted(ref, Number(t.layer || 0), Number(tags.layer || 0))

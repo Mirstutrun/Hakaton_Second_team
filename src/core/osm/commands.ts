@@ -7,6 +7,13 @@ import { oneWayDirection } from "../../engine/trafficRules";
 import { assertRoadEditSafe } from "./roadSafety";
 import { TurnRules } from "./turnRestrictions";
 import { childElements } from "./model";
+import {
+  isTrafficSignal,
+  MAX_SIGNAL_SECONDS,
+  SIGNAL_GREEN_TAG,
+  SIGNAL_RED_TAG,
+  validSignalSeconds,
+} from "./trafficSignals";
 import { createProjection } from "../geo/projection";
 import {
   coordinateOf,
@@ -38,6 +45,10 @@ export type EditCommand =
   | { type: "connect-roads"; wayId: string; nodeId: string; target: RoadPoint }
   | { type: "move-node"; id: string; coordinate: Coordinate }
   | { type: "insert-node"; wayId: string; index: number; point: RoadPoint }
+  | { type: "set-bridge"; wayId: string; enabled: boolean }
+  | { type: "add-signal"; wayId: string; index: number; point: Coordinate | { nodeId: string } }
+  | { type: "set-signal-timing"; id: string; red: number; green: number }
+  | { type: "remove-signal"; id: string }
   | { type: "remove-vertex"; wayId: string; index: number }
   | { type: "delete-way"; id: string }
   /** Остановка: stop_position на дороге и платформа (highway=bus_stop) сбоку от неё. */
@@ -503,6 +514,24 @@ export function applyEdit(
         setTags(command.target.type, command.target.id, command.tags);
         break;
       }
+      case "set-bridge": {
+        const way = requireElement(document, "way", command.wayId);
+        const tags = tagsOf(way);
+        if (!tags.highway || pedestrianTypes.has(tags.highway) || tags.area === "yes")
+          throw new Error("Выберите автомобильную дорогу");
+        if (command.enabled) {
+          if ((tags.tunnel && tags.tunnel !== "no") || tags.covered === "yes")
+            throw new Error("Крытый или подземный проезд нельзя отметить как мост");
+          const middle = new Set(refsOf(way).slice(1, -1));
+          if ([...document.ways.values()].some(other =>
+            other !== way && tagsOf(other).highway && refsOf(other).some(id => middle.has(id)),
+          )) throw new Error("На участке есть общий узел перекрёстка. Нарисуйте отдельный мост инструментом «Новый мост»");
+        }
+        setTags("way", command.wayId, command.enabled
+          ? { bridge: "yes", layer: Number(tags.layer) > 0 ? tags.layer : "1" }
+          : { bridge: null, layer: null });
+        break;
+      }
       case "create-road": {
         if (command.points.length < 2)
           throw new Error("Для дороги нужны минимум две точки");
@@ -761,6 +790,46 @@ export function applyEdit(
         patch.selection = { type: "way", id: command.wayId };
         break;
       }
+      case "add-signal": {
+        const way = requireElement(document, "way", command.wayId);
+        const tags = tagsOf(way);
+        if (!tags.highway || pedestrianTypes.has(tags.highway) || tags.area === "yes")
+          throw new Error("Поставьте светофор на автомобильную дорогу");
+        const point = command.point;
+        if ("nodeId" in point && !refsOf(way).includes(point.nodeId))
+          throw new Error("Узел светофора должен находиться на выбранной дороге");
+        const id = "nodeId" in point ? point.nodeId : insert(command.wayId, command.index, point);
+        const existing = tagsOf(requireElement(document, "node", id));
+        if (isTrafficSignal(existing))
+          throw new Error("Здесь уже есть светофор. Нажмите на его маркер");
+        if (existing.railway || existing.barrier || (existing.highway && existing.highway !== "crossing"))
+          throw new Error("Это место занято другим объектом. Поставьте светофор рядом");
+        setTags("node", id, existing.highway === "crossing"
+          ? { crossing: "traffic_signals" }
+          : { highway: "traffic_signals" });
+        patch.selection = { type: "node", id };
+        break;
+      }
+      case "set-signal-timing":
+      case "remove-signal": {
+        const tags = tagsOf(requireElement(document, "node", command.id));
+        if (!isTrafficSignal(tags)) throw new Error("Выберите светофор");
+        if (command.type === "set-signal-timing") {
+          if (!validSignalSeconds(command.red) || !validSignalSeconds(command.green))
+            throw new Error(`Укажите целое число секунд от 1 до ${MAX_SIGNAL_SECONDS}`);
+          setTags("node", command.id, {
+            [SIGNAL_RED_TAG]: String(command.red),
+            [SIGNAL_GREEN_TAG]: String(command.green),
+          });
+        } else {
+          setTags("node", command.id, {
+            [tags.highway === "crossing" ? "crossing" : "highway"]: null,
+            [SIGNAL_RED_TAG]: null,
+            [SIGNAL_GREEN_TAG]: null,
+          });
+        }
+        break;
+      }
       case "add-bus-stop": {
         const way = requireElement(document, "way", command.wayId);
         const wayTags = tagsOf(way);
@@ -940,10 +1009,7 @@ export function applyEdit(
         if (refs.length <= 2)
           throw new Error("В дороге должны остаться минимум две вершины");
         const id = refs[command.index];
-        if (
-          tagsOf(requireElement(document, "node", id)).highway ===
-          "traffic_signals"
-        )
+        if (isTrafficSignal(tagsOf(requireElement(document, "node", id))))
           throw new Error("Вершину со светофором удалить нельзя");
         if (
           Array.from(document.ways.values()).some(

@@ -20,6 +20,7 @@ import {
   type DrivingSide,
 } from "./trafficRules";
 import { busRoutes } from "../core/osm/busRoutes";
+import { isTrafficSignal, signalTiming } from "../core/osm/trafficSignals";
 
 export interface TrafficEdge {
   wayId: string;
@@ -77,6 +78,7 @@ export class TrafficModel {
   readonly cars = new Map<string, TrafficVehicle>();
   private readonly outgoing = new Map<string, TrafficEdge[]>();
   private readonly starts: TrafficEdge[] = [];
+  private readonly signals = new Map<string, ReturnType<typeof signalTiming>>();
   private readonly routes = new Map<
     string,
     { legs: TrafficEdge[][]; loop: boolean }
@@ -93,6 +95,10 @@ export class TrafficModel {
   ) {
     this.turnRules = new TurnRules(document);
     this.laneLinks = new LaneConnections(document);
+    for (const [id, node] of document.nodes) {
+      const tags = tagsOf(node);
+      if (isTrafficSignal(tags)) this.signals.set(id, signalTiming(tags));
+    }
     const projection = createProjection(documentOrigin(document));
     const blocked=obstacleFilter(document,projection);
     for (const [wayId, way] of document.ways) {
@@ -347,6 +353,10 @@ export class TrafficModel {
   get clock() {
     return this.seconds;
   }
+  signalIsRed(id: string): boolean {
+    const timing = this.signals.get(id);
+    return !!timing && this.seconds % (timing.red + timing.green) < timing.red;
+  }
   private hasRoom(
     edge: TrafficEdge,
     lane: number,
@@ -546,11 +556,21 @@ export class TrafficModel {
         : 0;
       car.stopped = headway <= clearance;
       if (car.stopped) continue;
+      const red = this.signalIsRed(car.edge.to);
+      const stopGap = Math.min(car.kind === "bus" ? 5.5 : 3, car.edge.length / 2);
+      const distanceToSignal = red
+        ? Math.max(0, (1 - car.progress) * car.edge.length - stopGap)
+        : Infinity;
       const travel = Math.min(
         car.speed * elapsed,
         Math.max(0, headway - clearance),
+        distanceToSignal,
       );
       car.progress += travel / car.edge.length;
+      if (red) {
+        car.stopped = distanceToSignal - travel < 1e-6;
+        continue;
+      }
       if (car.progress < 1) continue;
       const routeState = {
         routeLeg: car.routeLeg,
@@ -619,7 +639,10 @@ export class TrafficModel {
     // чтобы ожидающие машины не копились.
     for (const car of this.cars.values()) {
       const dwelling = car.kind === "bus" && (car.dwell ?? 0) > 0;
-      car.waited = car.stopped && !dwelling ? (car.waited ?? 0) + elapsed : 0;
+      const waitingOnRed = this.signalIsRed(car.edge.to);
+      car.waited = car.stopped && !dwelling && !waitingOnRed
+        ? (car.waited ?? 0) + elapsed
+        : 0;
       if (car.waited > (car.kind === "bus" ? STUCK_BUS_SECONDS : STUCK_CAR_SECONDS))
         arrived.add(car.id);
     }

@@ -206,9 +206,9 @@ onBeforeUnmount(() => manager?.dispose());
       <div class="spinner"></div>
       Подготовка дорожной сети…
     </div>
-    <div v-if="store.tool === 'draw'" class="draw-card">
+    <div v-if="store.tool === 'draw' || store.tool === 'bridge'" class="draw-card">
       <span
-        >Новая дорога · точек: <b>{{ store.draft.length }}</b></span
+        >{{ store.tool === "bridge" ? "Новый мост" : "Новая дорога" }} · точек: <b>{{ store.draft.length }}</b></span
       ><button
         class="primary"
         :disabled="store.draft.length < 2"

@@ -11,6 +11,7 @@ import {
 import { roadStyle } from "../engine/geometry/roads";
 import { useEditorStore } from "../stores/editor";
 import { applyFix, fixLabel, issuesOfSelection } from "../editor/issueFixes";
+import { isTrafficSignal, MAX_SIGNAL_SECONDS, signalTiming } from "../core/osm/trafficSignals";
 
 const store = useEditorStore();
 const confirmDelete = ref(false);
@@ -26,6 +27,10 @@ const isStop = computed(
     tags.value.public_transport === "stop_position" && tags.value.bus === "yes",
 );
 const pedestrian = computed(() => roadStyle(tags.value).pedestrian);
+const isSignal = computed(() => store.selection?.type === "node" && isTrafficSignal(tags.value));
+const isBridge = computed(() => !!tags.value.bridge && tags.value.bridge !== "no");
+const canMarkBridge = computed(() => !pedestrian.value && tags.value.covered !== "yes" &&
+  (!tags.value.tunnel || tags.value.tunnel === "no"));
 // Проблемы проверки у выбранного объекта: красную дорогу можно исправить прямо здесь.
 const selectedIssues = computed(() => {
   store.revision;
@@ -38,6 +43,8 @@ const laneCount = ref(1);
 const directions = ref<LaneDirection[]>([]);
 const touched = ref(false);
 const stopName = ref("");
+const redSeconds = ref(10);
+const greenSeconds = ref(12);
 // Сбрасывается при смене объекта или после правки, но не при повторном клике
 // по той же дороге (например, чтобы выбрать полосу для соединения).
 watch(
@@ -48,6 +55,9 @@ watch(
     directions.value = laneDirections(tags.value, count, store.drivingSide);
     touched.value = false;
     stopName.value = tags.value.name ?? "";
+    const timing = signalTiming(tags.value);
+    redSeconds.value = timing.red;
+    greenSeconds.value = timing.green;
     confirmDelete.value = false;
   },
   { immediate: true },
@@ -112,12 +122,27 @@ function renameStop() {
   if (store.selection?.type !== "node") return;
   store.execute({ type: "rename-bus-stop", id: store.selection.id, name: stopName.value });
 }
+function saveSignal() {
+  if (!isSignal.value || !store.selection) return;
+  store.execute({
+    type: "set-signal-timing",
+    id: store.selection.id,
+    red: redSeconds.value,
+    green: greenSeconds.value,
+  });
+}
+function toggleBridge() {
+  if (!isRoad.value || !store.selection) return;
+  store.execute({ type: "set-bridge", wayId: store.selection.id, enabled: !isBridge.value });
+}
 function remove() {
   if (!store.selection) return;
   const patch = store.execute(
     isRoad.value
       ? { type: "delete-way", id: store.selection.id }
-      : { type: "remove-bus-stop", id: store.selection.id },
+      : isSignal.value
+        ? { type: "remove-signal", id: store.selection.id }
+        : { type: "remove-bus-stop", id: store.selection.id },
   );
   if (patch) store.selectOsmElement(null);
   confirmDelete.value = false;
@@ -217,6 +242,11 @@ function removeVertex() {
           Пешеходная дорожка: полосы для транспорта не настраиваются.
         </p>
         <LaneConnectionsPanel v-if="!pedestrian" />
+        <div v-if="canMarkBridge" class="geometry-details">
+          <button class="full-width" @click="toggleBridge">
+            {{ isBridge ? "Снять отметку моста" : "Отметить участок как мост" }}
+          </button>
+        </div>
         <div v-if="vertexEditing" class="geometry-details">
           <button class="full-width" @click="removeVertex">
             Удалить выбранную вершину
@@ -235,6 +265,21 @@ function removeVertex() {
             <button class="danger" @click="remove">Подтвердить удаление</button
             ><button @click="confirmDelete = false">Отмена</button>
           </div>
+        </div>
+      </template>
+      <template v-else-if="isSignal">
+        <h2>Светофор</h2>
+        <form class="properties-form" @submit.prevent="saveSignal">
+          <label>Красный, сек.
+            <input v-model.number="redSeconds" type="number" min="1" :max="MAX_SIGNAL_SECONDS" step="1" required />
+          </label>
+          <label>Зелёный, сек.
+            <input v-model.number="greenSeconds" type="number" min="1" :max="MAX_SIGNAL_SECONDS" step="1" required />
+          </label>
+          <button class="primary full-width">Применить</button>
+        </form>
+        <div class="delete-section">
+          <button class="danger full-width" @click="remove">Убрать светофор</button>
         </div>
       </template>
       <template v-else-if="isStop">
